@@ -1,0 +1,768 @@
+1. Users (Sales)
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(255) UNIQUE,
+    phone VARCHAR(30),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT now(),
+    updated_at TIMESTAMP DEFAULT now()
+);
+2. Master Source
+
+contoh:
+
+Ads
+Organik
+Referensi
+Offline
+CREATE TABLE master_sources (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) UNIQUE NOT NULL
+);
+3. Master Input
+
+contoh:
+
+Otomatis
+Manual
+CREATE TABLE master_inputs (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(50)
+);
+4. Master Quality
+
+contoh:
+
+Cold
+Warm
+Hot
+CREATE TABLE master_qualities (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(50),
+    color VARCHAR(20)
+);
+5. Master Status
+
+contoh
+
+Need Response
+Waiting Customer
+Dormant
+CREATE TABLE master_statuses (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100),
+    color VARCHAR(20)
+);
+6. Master Result
+
+contoh
+
+Belum
+Deal
+Cancel
+CREATE TABLE master_results (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(50)
+);
+7. Product
+CREATE TABLE products (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100),
+    price NUMERIC(15,2)
+);
+8. Group
+CREATE TABLE product_groups (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100)
+);
+
+contoh
+
+Open Trip
+Private Trip
+9. Leads (Tabel Utama)
+
+Ini inti sistem.
+
+CREATE TABLE leads (
+
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    sales_id UUID REFERENCES users(id),
+
+    source_id INTEGER REFERENCES master_sources(id),
+
+    input_id INTEGER REFERENCES master_inputs(id),
+
+    quality_id INTEGER REFERENCES master_qualities(id),
+
+    status_id INTEGER REFERENCES master_statuses(id),
+
+    result_id INTEGER REFERENCES master_results(id),
+
+    product_id INTEGER REFERENCES products(id),
+
+    group_id INTEGER REFERENCES product_groups(id),
+
+    customer_name VARCHAR(150),
+
+    phone VARCHAR(30),
+
+    date_received DATE,
+
+    deal_date DATE,
+
+    price NUMERIC(15,2),
+
+    pax INTEGER,
+
+    total_price NUMERIC(15,2),
+
+    created_at TIMESTAMP DEFAULT now(),
+
+    updated_at TIMESTAMP DEFAULT now()
+);
+10. Lead Activity
+
+Saya sangat menyarankan tabel ini.
+
+Karena nanti semua perubahan bisa dilihat.
+
+CREATE TABLE lead_activities (
+
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    lead_id UUID REFERENCES leads(id),
+
+    activity_type VARCHAR(100),
+
+    activity_detail TEXT,
+
+    created_by UUID REFERENCES users(id),
+
+    created_at TIMESTAMP DEFAULT now()
+);
+
+Contoh:
+
+Lead dibuat
+
+Status berubah
+
+Produk berubah
+
+Sales berubah
+
+Deal
+
+Follow Up
+
+AI Summary dibuat
+11. Lead History
+
+Ini berbeda.
+
+Kalau activity lebih seperti log.
+
+History menyimpan perubahan value.
+
+CREATE TABLE lead_histories (
+
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    lead_id UUID REFERENCES leads(id),
+
+    field_name VARCHAR(100),
+
+    old_value TEXT,
+
+    new_value TEXT,
+
+    changed_by UUID REFERENCES users(id),
+
+    changed_at TIMESTAMP DEFAULT now()
+);
+
+Misalnya
+
+Status
+
+Need Response
+
+↓
+
+Waiting Customer
+
+atau
+
+Quality
+
+Cold
+
+↓
+
+Hot
+
+Semuanya tersimpan.
+
+12. Notes
+
+Kalau sales mau memberi catatan.
+
+CREATE TABLE lead_notes (
+
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    lead_id UUID REFERENCES leads(id),
+
+    note TEXT,
+
+    created_by UUID REFERENCES users(id),
+
+    created_at TIMESTAMP DEFAULT now()
+);
+Saya akan menambahkan 3 tabel lagi
+
+Karena tadi Anda sempat cerita ingin AI.
+
+WhatsApp Messages
+CREATE TABLE lead_messages (
+
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    lead_id UUID REFERENCES leads(id),
+
+    sender VARCHAR(30),
+
+    message TEXT,
+
+    sent_at TIMESTAMP
+);
+AI Analysis
+CREATE TABLE ai_analysis (
+
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    lead_id UUID REFERENCES leads(id),
+
+    sentiment VARCHAR(30),
+
+    quality_score INTEGER,
+
+    summary TEXT,
+
+    recommendation TEXT,
+
+    created_at TIMESTAMP DEFAULT now()
+);
+Leaderboard Snapshot
+
+Supaya dashboard cepat.
+
+CREATE TABLE leaderboard_daily (
+
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    sales_id UUID REFERENCES users(id),
+
+    date DATE,
+
+    total_leads INTEGER,
+
+    total_deals INTEGER,
+
+    avg_response_time INTEGER,
+
+    score NUMERIC(5,2)
+);
+Total Struktur Database
+users
+    │
+    │
+    ▼
+leads
+    │
+    ├───────────── lead_messages
+    │
+    ├───────────── lead_notes
+    │
+    ├───────────── lead_histories
+    │
+    ├───────────── lead_activities
+    │
+    └───────────── ai_analysis
+
+master_sources
+master_inputs
+master_qualities
+master_statuses
+master_results
+products
+product_groups
+
+leaderboard_daily
+Beberapa saran untuk pengembangan
+
+Melihat roadmap yang pernah kita diskusikan (WhatsApp, AI scoring, leaderboard, dan analytics), saya juga menyarankan beberapa penyesuaian sejak awal:
+
+Pisahkan customers dari leads jika satu pelanggan bisa membuat beberapa inquiry di waktu berbeda. Dengan begitu leads hanya menyimpan informasi prospek, sedangkan data pelanggan (nama, nomor HP) berada di tabel customers.
+Tambahkan campaign_id, adset_id, dan ad_id pada leads jika nantinya akan menarik data dari Meta Ads atau Google Ads. Ini akan memudahkan analisis performa iklan.
+Simpan seluruh perubahan melalui lead_histories, bukan hanya update nilai di tabel leads. Ini penting untuk audit trail dan analisis performa sales.
+Gunakan UUID sebagai primary key untuk hampir semua tabel agar aman jika nanti ada sinkronisasi antar sistem atau integrasi API.
+
+Dengan struktur seperti ini, database Anda tidak hanya cukup untuk UI saat ini, tetapi juga siap mendukung fitur-fitur lanjutan seperti dashboard KPI, AI conversation analysis, leaderboard, integrasi WhatsApp, hingga reporting tanpa perlu melakukan perubahan besar pada skema database.
+
+berdasarkan UI yang diberikan, buatlah query CREATE TABLE yang dibutuhkan untuk halaman booking, flow lead to booking dan dashboard
+
+Berdasarkan UI yang Anda berikan, saya melihat sistem ini merupakan CRM Travel Agency dengan flow:
+
+Lead
+   │
+   ▼
+Qualified Lead
+   │
+   ▼
+Deal
+   │
+   ▼
+Convert to Booking
+   │
+   ▼
+Booking
+   │
+   ├── Payment
+   ├── Passport
+   ├── Visa
+   ├── Ticket
+   ├── Ready to Depart
+   └── Completed
+
+Agar scalable, saya tidak menyarankan membuat satu tabel Booking yang sangat besar. Lebih baik dipisah menjadi beberapa tabel normalisasi.
+
+1. Customer
+
+Semua Lead maupun Booking mengacu ke customer yang sama.
+
+CREATE TABLE customers (
+    id BIGSERIAL PRIMARY KEY,
+
+    full_name VARCHAR(200) NOT NULL,
+    phone VARCHAR(30) NOT NULL,
+    email VARCHAR(200),
+
+    gender VARCHAR(20),
+    birth_date DATE,
+
+    passport_number VARCHAR(100),
+
+    address TEXT,
+
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+2. Sales
+
+Karena dashboard memiliki Deal Maker Ranking.
+
+CREATE TABLE sales (
+    id BIGSERIAL PRIMARY KEY,
+
+    full_name VARCHAR(150) NOT NULL,
+
+    email VARCHAR(200),
+
+    phone VARCHAR(30),
+
+    avatar TEXT,
+
+    is_active BOOLEAN DEFAULT TRUE,
+
+    created_at TIMESTAMP DEFAULT NOW()
+);
+3. Lead
+
+Lead berasal dari Meta Ads, Organik, Referral dll.
+
+CREATE TABLE leads (
+    id BIGSERIAL PRIMARY KEY,
+
+    customer_id BIGINT NOT NULL REFERENCES customers(id),
+
+    sales_id BIGINT REFERENCES sales(id),
+
+    lead_no VARCHAR(50) UNIQUE,
+
+    source VARCHAR(50),
+
+    input_method VARCHAR(50),
+
+    quality VARCHAR(30),
+
+    status VARCHAR(30),
+
+    progress VARCHAR(50),
+
+    last_chat_at TIMESTAMP,
+
+    follow_up_date DATE,
+
+    converted_at TIMESTAMP,
+
+    is_converted BOOLEAN DEFAULT FALSE,
+
+    created_at TIMESTAMP DEFAULT NOW(),
+
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+Status:
+
+Waiting Customer
+Need Response
+Dormant
+
+Progress
+
+Belum Dihubungi
+Sudah Chat
+Sudah Penawaran
+Menunggu DP
+4. Countries
+
+Karena produk menuju negara.
+
+CREATE TABLE countries (
+    id BIGSERIAL PRIMARY KEY,
+
+    name VARCHAR(100),
+
+    code VARCHAR(10),
+
+    flag_url TEXT
+);
+5. Products (Trip)
+
+Sesuai UI:
+
+Japan Sakura
+Korea Autumn
+Thailand Relax
+CREATE TABLE products (
+    id BIGSERIAL PRIMARY KEY,
+
+    country_id BIGINT REFERENCES countries(id),
+
+    product_name VARCHAR(200),
+
+    trip_type VARCHAR(30),
+
+    duration_days INT,
+
+    description TEXT,
+
+    is_active BOOLEAN DEFAULT TRUE,
+
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+trip_type
+
+Open Trip
+Private Trip
+6. Departure
+
+Karena satu produk bisa memiliki banyak tanggal.
+
+CREATE TABLE departures (
+    id BIGSERIAL PRIMARY KEY,
+
+    product_id BIGINT REFERENCES products(id),
+
+    departure_date DATE,
+
+    quota INT,
+
+    booked_pax INT DEFAULT 0,
+
+    created_at TIMESTAMP DEFAULT NOW()
+);
+7. Booking
+
+Tabel utama.
+
+CREATE TABLE bookings (
+
+    id BIGSERIAL PRIMARY KEY,
+
+    booking_no VARCHAR(50) UNIQUE NOT NULL,
+
+    customer_id BIGINT NOT NULL REFERENCES customers(id),
+
+    lead_id BIGINT REFERENCES leads(id),
+
+    sales_id BIGINT REFERENCES sales(id),
+
+    departure_id BIGINT REFERENCES departures(id),
+
+    product_id BIGINT REFERENCES products(id),
+
+    booking_date DATE NOT NULL,
+
+    departure_date DATE,
+
+    pax INT NOT NULL,
+
+    price_per_pax NUMERIC(18,2),
+
+    total_price NUMERIC(18,2),
+
+    total_paid NUMERIC(18,2) DEFAULT 0,
+
+    remaining_payment NUMERIC(18,2) DEFAULT 0,
+
+    booking_status VARCHAR(50),
+
+    notes TEXT,
+
+    created_at TIMESTAMP DEFAULT NOW(),
+
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+Status Booking
+
+Waiting Payment 1
+Waiting Payment 2
+Waiting Payment 3
+
+Waiting Passport
+
+Waiting Visa
+
+Ticketing
+
+Ready to Depart
+
+Completed
+
+Cancelled
+8. Payment
+
+Karena ada Waiting Payment 2, Waiting Payment 3.
+
+CREATE TABLE booking_payments (
+
+    id BIGSERIAL PRIMARY KEY,
+
+    booking_id BIGINT NOT NULL REFERENCES bookings(id),
+
+    payment_no INT,
+
+    payment_date DATE,
+
+    amount NUMERIC(18,2),
+
+    payment_method VARCHAR(50),
+
+    reference_no VARCHAR(100),
+
+    notes TEXT,
+
+    created_at TIMESTAMP DEFAULT NOW()
+);
+9. Passenger
+
+Karena booking bisa 4 pax.
+
+CREATE TABLE booking_passengers (
+
+    id BIGSERIAL PRIMARY KEY,
+
+    booking_id BIGINT REFERENCES bookings(id),
+
+    full_name VARCHAR(200),
+
+    passport_number VARCHAR(100),
+
+    birth_date DATE,
+
+    gender VARCHAR(20),
+
+    passport_expired DATE,
+
+    created_at TIMESTAMP DEFAULT NOW()
+);
+10. Booking Documents
+
+Untuk Passport, Visa, Ticket.
+
+CREATE TABLE booking_documents (
+
+    id BIGSERIAL PRIMARY KEY,
+
+    booking_id BIGINT REFERENCES bookings(id),
+
+    passenger_id BIGINT REFERENCES booking_passengers(id),
+
+    document_type VARCHAR(30),
+
+    document_number VARCHAR(100),
+
+    file_url TEXT,
+
+    issued_date DATE,
+
+    expired_date DATE,
+
+    status VARCHAR(30),
+
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+document_type
+
+PASSPORT
+
+VISA
+
+TICKET
+11. Booking Activity
+
+Timeline.
+
+CREATE TABLE booking_activities (
+
+    id BIGSERIAL PRIMARY KEY,
+
+    booking_id BIGINT REFERENCES bookings(id),
+
+    activity VARCHAR(100),
+
+    description TEXT,
+
+    created_by BIGINT REFERENCES sales(id),
+
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+Contoh
+
+Booking Created
+
+Payment Received
+
+Passport Uploaded
+
+Visa Approved
+
+Ticket Issued
+
+Completed
+12. Lead Activity
+
+Untuk histori CRM.
+
+CREATE TABLE lead_activities (
+
+    id BIGSERIAL PRIMARY KEY,
+
+    lead_id BIGINT REFERENCES leads(id),
+
+    activity VARCHAR(100),
+
+    notes TEXT,
+
+    created_by BIGINT REFERENCES sales(id),
+
+    created_at TIMESTAMP DEFAULT NOW()
+);
+Flow Lead → Booking
+Customer
+      │
+      ▼
+Lead
+      │
+      │
+Lead Activities
+      │
+      ▼
+Convert Booking
+      │
+      ▼
+Booking
+      │
+      ├──────────────┐
+      ▼              ▼
+Payments      Passengers
+                     │
+                     ▼
+             Booking Documents
+                     │
+                     ▼
+              Booking Activities
+Query Dashboard
+
+Dengan struktur ini, seluruh widget dashboard dapat dihasilkan melalui query agregasi:
+
+Penjualan
+SELECT SUM(total_paid)
+FROM bookings;
+Total Booking
+SELECT COUNT(*)
+FROM bookings;
+Total Pax
+SELECT SUM(pax)
+FROM bookings;
+Menunggu Pembayaran
+SELECT SUM(remaining_payment)
+FROM bookings
+WHERE remaining_payment > 0;
+Akan Berangkat
+SELECT COUNT(*)
+FROM bookings
+WHERE departure_date BETWEEN CURRENT_DATE
+AND CURRENT_DATE + INTERVAL '30 days';
+Booking Selesai
+SELECT COUNT(*)
+FROM bookings
+WHERE booking_status='Completed';
+Deal Maker Ranking
+SELECT
+    s.full_name,
+    COUNT(b.id) AS total_booking,
+    SUM(b.pax) AS total_pax,
+    SUM(b.total_price) AS revenue
+FROM bookings b
+JOIN sales s
+ON s.id = b.sales_id
+GROUP BY s.full_name
+ORDER BY revenue DESC;
+Top Product
+SELECT
+    p.product_name,
+    SUM(b.pax) pax,
+    SUM(b.total_price) revenue
+FROM bookings b
+JOIN products p
+ON p.id=b.product_id
+GROUP BY p.product_name
+ORDER BY revenue DESC;
+Grafik Penjualan
+SELECT
+    booking_date,
+    SUM(total_price)
+FROM bookings
+GROUP BY booking_date
+ORDER BY booking_date;
+Catatan Arsitektur
+
+Saya juga menyarankan menambahkan beberapa tabel pendukung agar sistem lebih fleksibel untuk jangka panjang:
+
+booking_status_histories untuk menyimpan riwayat perubahan status booking.
+lead_status_histories untuk melacak perpindahan status lead hingga menjadi converted.
+payment_installments jika skema cicilan (DP, pelunasan, dll.) ingin dikelola secara eksplisit.
+marketing_sources sebagai master data sumber lead (Meta Ads, Referral, Organik, TikTok, dll.).
+trip_groups untuk mendukung satu produk memiliki beberapa keberangkatan dengan kapasitas dan harga yang berbeda.
+
+Dengan skema tersebut, halaman Booking, flow Lead → Booking, dan Dashboard dapat dibangun tanpa perlu mengubah struktur database ketika fitur baru seperti refund, reschedule, atau multi-keberangkatan ditambahkan.
