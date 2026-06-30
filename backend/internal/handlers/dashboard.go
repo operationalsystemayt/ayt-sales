@@ -77,7 +77,7 @@ func GetDashboardLeaderboard(c *gin.Context) {
 		Revenue   float64 `json:"revenue"`
 	}
 
-	var rows []LeaderboardRow
+	rows := make([]LeaderboardRow, 0)
 	database.DB.Raw(`
 		SELECT u.id as sales_id, u.full_name, u.avatar,
 		       COALESCE(SUM(b.pax), 0) as total_pax,
@@ -113,7 +113,7 @@ func GetDashboardTopProducts(c *gin.Context) {
 		Revenue     float64 `json:"revenue"`
 	}
 
-	var rows []TopProductRow
+	rows := make([]TopProductRow, 0)
 	database.DB.Raw(`
 		SELECT p.product_name, co.flag_url, co.name as country_name,
 		       COALESCE(SUM(b.pax), 0) as total_pax,
@@ -148,7 +148,7 @@ func GetDashboardChart(c *gin.Context) {
 		Revenue float64 `json:"revenue"`
 	}
 
-	var rows []ChartRow
+	rows := make([]ChartRow, 0)
 	database.DB.Raw(`
 		SELECT
 			EXTRACT(DAY FROM gs.day)::int as day,
@@ -178,7 +178,7 @@ func GetTopTrips(c *gin.Context) {
 		Revenue  float64 `json:"revenue"`
 	}
 
-	var rows []TripRow
+	rows := make([]TripRow, 0)
 	database.DB.Raw(`
 		SELECT p.trip_type,
 		       COALESCE(SUM(b.pax), 0) as total_pax,

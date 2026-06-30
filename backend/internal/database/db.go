@@ -6,6 +6,8 @@ import (
 
 	"github.com/ayt-sales/backend/internal/config"
 	"github.com/ayt-sales/backend/internal/models"
+	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -89,6 +91,32 @@ func seed(db *gorm.DB) {
 
 	groups := []models.ProductGroup{{Name: "Open Trip"}, {Name: "Private Trip"}}
 	db.Create(&groups)
+
+	// Default admin user
+	hash, _ := bcrypt.GenerateFromPassword([]byte("admin123"), bcrypt.DefaultCost)
+	adminUser := models.User{
+		ID:           uuid.New(),
+		FullName:     "Admin",
+		Email:        "admin@ayt.com",
+		PasswordHash: string(hash),
+		Role:         "admin",
+		IsActive:     true,
+	}
+	db.Create(&adminUser)
+
+	// Default sales users
+	salesNames := []struct{ name, email string }{
+		{"Raya", "raya@ayt.com"},
+		{"Jean", "jean@ayt.com"},
+		{"Jevry", "jevry@ayt.com"},
+	}
+	for _, s := range salesNames {
+		h, _ := bcrypt.GenerateFromPassword([]byte("sales123"), bcrypt.DefaultCost)
+		db.Create(&models.User{
+			ID: uuid.New(), FullName: s.name, Email: s.email,
+			PasswordHash: string(h), Role: "sales", IsActive: true,
+		})
+	}
 
 	countries := []models.Country{
 		{Name: "Jepang", Code: "JP", FlagURL: "🇯🇵"},

@@ -1,6 +1,9 @@
 package router
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/ayt-sales/backend/internal/handlers"
 	"github.com/ayt-sales/backend/internal/middleware"
 	"github.com/gin-contrib/cors"
@@ -8,7 +11,29 @@ import (
 )
 
 func Setup() *gin.Engine {
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.Recovery())
+
+	// Structured request logger
+	r.Use(func(c *gin.Context) {
+		start := time.Now()
+		c.Next()
+		latency := time.Since(start)
+		status := c.Writer.Status()
+		color := ""
+		switch {
+		case status >= 500:
+			color = "\033[31m" // red
+		case status >= 400:
+			color = "\033[33m" // yellow
+		case status >= 200:
+			color = "\033[32m" // green
+		}
+		fmt.Printf("%s[%d]\033[0m %s %s  %v  %s\n",
+			color, status, c.Request.Method, c.Request.URL.Path,
+			latency, c.ClientIP(),
+		)
+	})
 
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:5173", "http://localhost:3000"},

@@ -1,0 +1,112 @@
+Bersih. Ini cara lengkap jalankan lokal:
+
+  ---
+  Cara Test Lokal
+
+  Prasyarat
+
+  - PostgreSQL running (lokal atau via Docker)
+  - Go 1.24 (sudah ada)
+  - Node.js + npm (sudah ada)
+
+  ---
+  1. Setup Database PostgreSQL
+
+  Opsi A — Docker (paling mudah):
+  docker run -d --name ayt-pg \
+    -e POSTGRES_USER=postgres \
+    -e POSTGRES_PASSWORD=postgres \
+    -e POSTGRES_DB=ayt_sales \
+    -p 5432:5432 postgres:16-alpine
+
+  Opsi B — PostgreSQL lokal:
+  # Di psql:
+  CREATE DATABASE ayt_sales;
+
+  ---
+  2. Jalankan Backend
+
+  cd /Users/mac-211449/Documents/ayt-sales/backend
+
+  # Buat file .env
+  cp .env.example .env
+  # Edit .env jika password/port berbeda
+
+  # Jalankan (auto-migrate + auto-seed)
+  go run ./cmd/server
+
+  Backend akan otomatis:
+  - Buat semua tabel
+  - Seed data master (sources, qualities, statuses, dll)
+  - Buat user default
+
+  ---
+  3. Jalankan Frontend
+
+  # Terminal baru
+  cd /Users/mac-211449/Documents/ayt-sales/frontend
+  npm run dev
+
+  Buka browser: http://localhost:5173
+
+  ---
+  4. Login
+
+  ┌───────┬───────────────┬──────────┐
+  │ Role  │     Email     │ Password │
+  ├───────┼───────────────┼──────────┤
+  │ Admin │ admin@ayt.com │ admin123 │
+  ├───────┼───────────────┼──────────┤
+  │ Sales │ raya@ayt.com  │ sales123 │
+  ├───────┼───────────────┼──────────┤
+  │ Sales │ jean@ayt.com  │ sales123 │
+  ├───────┼───────────────┼──────────┤
+  │ Sales │ jevry@ayt.com │ sales123 │
+  └───────┴───────────────┴──────────┘
+
+  ---
+  Yang sudah jalan:
+
+  - ✅ Login & JWT auth
+  ---
+  Yang sudah jalan:
+
+  - ✅ Login & JWT auth
+  └───────┴───────────────┴──────────┘
+
+  ---
+  Yang sudah jalan:
+
+  - ✅ Login & JWT auth
+  - ✅ Dashboard — KPI cards, grafik penjualan, grafik leads, deal maker ranking, top product
+  - ✅ Leads & Deals — tabel, filter, inline edit, bulk edit, tambah manual, convert to booking
+  - ✅ Booking — tabel, summary cards, filter, tambah booking, update status, detail booking
+  - ✅ Auto-seed master data & user default saat pertama run
+
+
+Keduanya clean. Ringkasan perubahan:
+
+  Root cause error: Go nil slice → JSON null → setState(null) → .map() crash.
+
+  Fix yang diterapkan:
+
+  ┌─────────────────────────┬─────────────────────────────────────────────────────────────────────────────────────────┐
+  │                         │                                        Perubahan                                        │
+  ├─────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Backend — dashboard.go  │ Semua var rows []T diubah ke rows := make([]T, 0) sehingga Go selalu serialize [] bukan │
+  │                         │  null                                                                                   │
+  ├─────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Frontend —             │ Semua .then((r) => setState(r.data)) pakai r.data ?? [] sebagai fallback                  │
+  │ Dashboard.tsx          │                                                                                           │
+  ├────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Frontend —             │ Tambah .catch() per request agar error API terlihat di console                            │
+  │ Dashboard.tsx          │                                                                                           │
+  ├────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Backend — router.go    │ Custom request logger: [200] GET /api/leads 1.2ms 127.0.0.1 dengan warna per status code  │
+  ├────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Frontend — api.ts      │ Axios interceptors: log → METHOD /url saat request, ← STATUS /url saat response, ✗ STATUS │
+  │                        │  /url saat error                                                                          │
+  └────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────┘
+
+  Sekarang restart backend (go run ./cmd/server) dan refresh browser — error hilang dan semua request terlihat di terminal
+  backend + browser DevTools console.

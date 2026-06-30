@@ -5,13 +5,20 @@ const api = axios.create({ baseURL: '/api' })
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token')
   if (token) config.headers.Authorization = `Bearer ${token}`
+  console.debug(`[API] → ${config.method?.toUpperCase()} ${config.url}`, config.params ?? '')
   return config
 })
 
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    console.debug(`[API] ← ${res.status} ${res.config.url}`, res.data)
+    return res
+  },
   (err) => {
-    if (err.response?.status === 401) {
+    const status = err.response?.status
+    const url = err.config?.url
+    console.error(`[API] ✗ ${status ?? 'ERR'} ${url}`, err.response?.data ?? err.message)
+    if (status === 401) {
       localStorage.removeItem('token')
       localStorage.removeItem('user')
       window.location.href = '/login'

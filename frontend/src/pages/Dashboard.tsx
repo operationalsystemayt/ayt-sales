@@ -54,11 +54,11 @@ export default function Dashboard() {
 
   useEffect(() => {
     const params = getDateRange(period)
-    getDashboardSummary(params).then((r) => setSummary(r.data))
-    getDashboardLeaderboard(params).then((r) => setLeaderboard(r.data))
-    getDashboardTopProducts(params).then((r) => setTopProducts(r.data))
-    getDashboardChart(params).then((r) => setChartData(r.data))
-    getTopTrips(params).then((r) => setTopTrips(r.data))
+    getDashboardSummary(params).then((r) => setSummary(r.data)).catch((e) => console.error('[Dashboard] summary:', e))
+    getDashboardLeaderboard(params).then((r) => setLeaderboard(r.data ?? [])).catch((e) => console.error('[Dashboard] leaderboard:', e))
+    getDashboardTopProducts(params).then((r) => setTopProducts(r.data ?? [])).catch((e) => console.error('[Dashboard] top-products:', e))
+    getDashboardChart(params).then((r) => setChartData(r.data ?? [])).catch((e) => console.error('[Dashboard] chart:', e))
+    getTopTrips(params).then((r) => setTopTrips(r.data ?? [])).catch((e) => console.error('[Dashboard] top-trips:', e))
   }, [period])
 
   const kpis = summary
