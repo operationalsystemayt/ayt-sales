@@ -49,7 +49,70 @@ func GetLeads(c *gin.Context) {
 	}
 
 	q.Find(&leads)
+
+	dormantHours := GetDormantHours()
+	closeHours := GetCloseHours()
+	needResponseID, waitingCustomerID, dormantID, closeID := statusIDsByName()
+	for i := range leads {
+		recomputeLeadStatus(&leads[i], dormantHours, closeHours, needResponseID, waitingCustomerID, dormantID, closeID)
+	}
+
 	c.JSON(http.StatusOK, leads)
+}
+
+// statusIDsByName resolves the MasterStatus IDs used by the on-the-fly status recompute below.
+func statusIDsByName() (needResponseID, waitingCustomerID, dormantID, closeID uint) {
+	var nr, wc, do, cl models.MasterStatus
+	database.DB.Where("name = ?", "Need Response").First(&nr)
+	database.DB.Where("name = ?", "Waiting Customer").First(&wc)
+	database.DB.Where("name = ?", "Dormant").First(&do)
+	database.DB.Where("name = ?", "Close").First(&cl)
+	return nr.ID, wc.ID, do.ID, cl.ID
+}
+
+// recomputeLeadStatus inspects the lead's most recent Chat row and updates status_id
+// in-memory (for this response) and persists it if it changed, so status filters and
+// bulk-edit keep working off the stored column.
+//
+// Rules: an inbound (customer) message always means Need Response, immediately. An
+// outbound (sales) message means Waiting Customer immediately, decaying to Dormant
+// after dormantHours of silence and to Close after closeHours.
+func recomputeLeadStatus(lead *models.Lead, dormantHours, closeHours int, needResponseID, waitingCustomerID, dormantID, closeID uint) {
+	var lastChat models.Chat
+	if err := database.DB.Where("lead_id = ?", lead.ID).
+		Order("chat_timestamp DESC").First(&lastChat).Error; err != nil {
+		return // no chat history yet — leave status untouched
+	}
+
+	var newStatusID uint
+	switch lastChat.Direction {
+	case "in":
+		newStatusID = needResponseID
+	case "out":
+		elapsed := time.Since(lastChat.ChatTimestamp)
+		switch {
+		case elapsed >= time.Duration(closeHours)*time.Hour:
+			newStatusID = closeID
+		case elapsed >= time.Duration(dormantHours)*time.Hour:
+			newStatusID = dormantID
+		default:
+			newStatusID = waitingCustomerID
+		}
+	default:
+		return
+	}
+
+	if newStatusID == 0 {
+		return
+	}
+
+	if lead.StatusID == nil || *lead.StatusID != newStatusID {
+		database.DB.Model(&models.Lead{}).Where("id = ?", lead.ID).Update("status_id", newStatusID)
+		lead.StatusID = &newStatusID
+		var st models.MasterStatus
+		database.DB.First(&st, newStatusID)
+		lead.Status = &st
+	}
 }
 
 type CreateLeadRequest struct {
@@ -171,6 +234,7 @@ type UpdateLeadRequest struct {
 	Price     *float64 `json:"price"`
 	Pax       *int     `json:"pax"`
 	DealDate  *string  `json:"deal_date"`
+	Notes     *string  `json:"notes"`
 }
 
 func UpdateLead(c *gin.Context) {
@@ -185,6 +249,49 @@ func UpdateLead(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+
+	if req.QualityID != nil {
+		var q models.MasterQuality
+		if err := database.DB.First(&q, *req.QualityID).Error; err == nil && q.Name == "Hot" {
+			effProduct := req.ProductID
+			if effProduct == nil {
+				effProduct = lead.ProductID
+			}
+			effGroup := req.GroupID
+			if effGroup == nil {
+				effGroup = lead.GroupID
+			}
+			effPrice := req.Price
+			if effPrice == nil {
+				effPrice = lead.Price
+			}
+			effPax := req.Pax
+			if effPax == nil {
+				effPax = lead.Pax
+			}
+
+			var missing []string
+			if effProduct == nil {
+				missing = append(missing, "product_id")
+			}
+			if effGroup == nil {
+				missing = append(missing, "group_id")
+			}
+			if effPrice == nil {
+				missing = append(missing, "price")
+			}
+			if effPax == nil {
+				missing = append(missing, "pax")
+			}
+			if len(missing) > 0 {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error":          "Kualitas Hot membutuhkan Produk, Grup, Harga, dan Pax terisi",
+					"missing_fields": missing,
+				})
+				return
+			}
+		}
 	}
 
 	updates := map[string]interface{}{}
@@ -230,6 +337,9 @@ func UpdateLead(c *gin.Context) {
 			updates["deal_date"] = t
 		}
 	}
+	if req.Notes != nil {
+		updates["notes"] = *req.Notes
+	}
 
 	// Recalculate total
 	price := lead.Price
@@ -253,9 +363,9 @@ func UpdateLead(c *gin.Context) {
 }
 
 type BulkUpdateRequest struct {
-	IDs       []string    `json:"ids" binding:"required"`
-	Field     string      `json:"field" binding:"required"`
-	Value     interface{} `json:"value"`
+	IDs   []string    `json:"ids" binding:"required"`
+	Field string      `json:"field" binding:"required"`
+	Value interface{} `json:"value"`
 }
 
 func BulkUpdateLeads(c *gin.Context) {
@@ -268,15 +378,30 @@ func BulkUpdateLeads(c *gin.Context) {
 	allowedFields := map[string]bool{
 		"source_id": true, "quality_id": true, "result_id": true,
 		"product_id": true, "group_id": true, "status_id": true,
+		"deal_date": true,
 	}
 	if !allowedFields[req.Field] {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Field tidak diizinkan untuk bulk update"})
 		return
 	}
 
-	database.DB.Model(&models.Lead{}).
-		Where("id IN ?", req.IDs).
-		Update(req.Field, req.Value)
+	if req.Field == "deal_date" {
+		dateStr, ok := req.Value.(string)
+		if !ok || dateStr == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "deal_date value harus berupa tanggal (YYYY-MM-DD)"})
+			return
+		}
+		t, err := time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Format tanggal tidak valid"})
+			return
+		}
+		database.DB.Model(&models.Lead{}).Where("id IN ?", req.IDs).Update("deal_date", t)
+	} else {
+		database.DB.Model(&models.Lead{}).
+			Where("id IN ?", req.IDs).
+			Update(req.Field, req.Value)
+	}
 
 	c.JSON(http.StatusOK, gin.H{"updated": len(req.IDs)})
 }
@@ -288,12 +413,13 @@ func DeleteLead(c *gin.Context) {
 }
 
 type ConvertLeadRequest struct {
-	ProductID     uint    `json:"product_id" binding:"required"`
-	GroupID       uint    `json:"group_id"`
-	DepartureDate string  `json:"departure_date" binding:"required"`
-	PricePerPax   float64 `json:"price_per_pax" binding:"required"`
-	Pax           int     `json:"pax" binding:"required"`
-	BookingStatus string  `json:"booking_status"`
+	ProductID     *uint    `json:"product_id"`
+	GroupID       *uint    `json:"group_id"`
+	DepartureDate string   `json:"departure_date" binding:"required"`
+	PricePerPax   *float64 `json:"price_per_pax"`
+	Pax           *int     `json:"pax"`
+	BookingStatus string   `json:"booking_status"`
+	DealDate      *string  `json:"deal_date"`
 }
 
 func ConvertLeadToBooking(c *gin.Context) {
@@ -314,8 +440,47 @@ func ConvertLeadToBooking(c *gin.Context) {
 		return
 	}
 
-	departureDate, _ := time.Parse("2006-01-02", req.DepartureDate)
-	totalPrice := req.PricePerPax * float64(req.Pax)
+	productID := req.ProductID
+	if productID == nil {
+		productID = lead.ProductID
+	}
+	groupID := req.GroupID
+	if groupID == nil {
+		groupID = lead.GroupID
+	}
+	pricePerPax := req.PricePerPax
+	if pricePerPax == nil {
+		pricePerPax = lead.Price
+	}
+	pax := req.Pax
+	if pax == nil {
+		pax = lead.Pax
+	}
+
+	var missing []string
+	if productID == nil {
+		missing = append(missing, "product_id")
+	}
+	if pricePerPax == nil {
+		missing = append(missing, "price_per_pax")
+	}
+	if pax == nil {
+		missing = append(missing, "pax")
+	}
+	if len(missing) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":          "Produk, Harga per Pax, dan Jumlah Pax wajib diisi",
+			"missing_fields": missing,
+		})
+		return
+	}
+
+	departureDate, err := time.Parse("2006-01-02", req.DepartureDate)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Format tanggal keberangkatan tidak valid"})
+		return
+	}
+	totalPrice := *pricePerPax * float64(*pax)
 
 	bookingStatus := req.BookingStatus
 	if bookingStatus == "" {
@@ -334,11 +499,13 @@ func ConvertLeadToBooking(c *gin.Context) {
 		CustomerID:       lead.CustomerID,
 		LeadID:           &lead.ID,
 		SalesID:          lead.SalesID,
-		ProductID:        &req.ProductID,
-		BookingDate:      time.Now(),
+		ProductID:        productID,
+		GroupID:          groupID,
+		SourceID:         lead.SourceID,
+		BookingDate:      now,
 		DepartureDate:    &departureDate,
-		Pax:              req.Pax,
-		PricePerPax:      req.PricePerPax,
+		Pax:              *pax,
+		PricePerPax:      *pricePerPax,
 		TotalPrice:       totalPrice,
 		RemainingPayment: totalPrice,
 		BookingStatus:    bookingStatus,
@@ -350,11 +517,22 @@ func ConvertLeadToBooking(c *gin.Context) {
 	}
 
 	// Mark lead as converted
-	now2 := time.Now()
-	database.DB.Model(&lead).Updates(map[string]interface{}{
+	var convertedResult models.MasterResult
+	database.DB.Where("name = ?", "Converted").First(&convertedResult)
+
+	leadUpdates := map[string]interface{}{
 		"is_converted": true,
-		"converted_at": now2,
-	})
+		"converted_at": now,
+	}
+	if convertedResult.ID != 0 {
+		leadUpdates["result_id"] = convertedResult.ID
+	}
+	if req.DealDate != nil && *req.DealDate != "" {
+		if dd, err := time.Parse("2006-01-02", *req.DealDate); err == nil {
+			leadUpdates["deal_date"] = dd
+		}
+	}
+	database.DB.Model(&lead).Updates(leadUpdates)
 
 	creatorID := c.MustGet("user_id").(uuid.UUID)
 	database.DB.Create(&models.LeadActivity{

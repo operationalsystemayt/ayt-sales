@@ -110,3 +110,92 @@ Keduanya clean. Ringkasan perubahan:
 
   Sekarang restart backend (go run ./cmd/server) dan refresh browser — error hilang dan semua request terlihat di terminal
   backend + browser DevTools console.
+
+
+   Quick clarification first: our webhook endpoint only models inbound WhatsApp messages (from the customer). A sales reply
+  isn't something WhatsApp would "webhook" to us — in the real integration that's an outbound message your team sends,
+  which we record via the POST /leads/:id/chats endpoint (direction: "out"), not the webhook. So "step 2" below uses that
+  endpoint instead of the webhook, but the end effect (status flips, chat thread updates) is the same. Here's the full
+  walkthrough:
+
+⏺ Bash(lsof -nP -iTCP:8080 -sTCP:LISTEN >/dev/null 2>&1 && echo "backend: running" || echo "backend: NOT running"
+      lsof -nP -iTCP:5173 -sTCP:LISTEN >/dev/null 2>&1 && e…)
+  ⎿  backend: running
+     frontend: running
+  ⎿  Allowed by auto mode classifier
+
+⏺ Both dev servers are up. Here's the sequence:
+
+  Step 1 — Webhook: customer asks about pricing (inbound)
+
+⏺ Bash(curl -s -X POST http://localhost:8080/api/webhooks/whatsapp \
+        -H "Content-Type: application/json" \…)
+  ⎿  {
+       "processed": 1,
+       "status": "ok"
+     }
+  ⎿  Allowed by auto mode classifier
+
+⏺ Step 2 — Look up the lead that was just created
+
+⏺ Bash(TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login -H "Content-Type: application/json" -d
+      '{"email":"admin@ayt.com","password":"admin123"}' | python3…)
+  ⎿  LEAD_ID: 7b3ca018-083c-464c-9dc1-b06a96a923ef
+     status: Need Response
+     quality: Warm
+  ⎿  Allowed by auto mode classifier
+
+⏺ Status is correctly "Need Response" since the last message is inbound. Now save that lead ID for the next steps.
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Step 3 — Sales replies with the price (outbound chat, not a webhook)
+
+⏺ Bash(TOKEN=$(cat /tmp/ayt_token.txt)
+      LEAD_ID=$(cat /tmp/ayt_lead_id.txt)…)
+  ⎿  {
+       "id": "f2850ae7-875f-46d7-960c-07fe95b43fa6",
+       "lead_id": "7b3ca018-083c-464c-9dc1-b06a96a923ef",
+     … +10 lines (ctrl+o to expand)
+  ⎿  Allowed by auto mode classifier
+
+⏺ Step 4 — Webhook: customer agrees to the price (inbound again)
+
+⏺ Bash(curl -s -X POST http://localhost:8080/api/webhooks/whatsapp \
+        -H "Content-Type: application/json" \…)
+  ⎿  {
+       "processed": 1,
+       "status": "ok"
+     … +37 lines (ctrl+o to expand)
+  ⎿  Allowed by auto mode classifier
+
+⏺ The full 3-message conversation is recorded correctly and status is back to "Need Response" (customer sent the last
+  message). Now for the manual conversion:
+
+  Step 5 — View it in the browser and convert manually
+
+  Open http://localhost:5173/leads, log in as admin@ayt.com / admin123, find "Andi Calon Customer" (or click the chat icon
+  in the Status column to see the thread first), then click the yellow Eye icon → fill in Produk / Grup / Harga per Pax 
+  (3.5) / Jumlah Pax (2) → Create Booking.
+
+  Or do it via API right now:
+
+⏺ Bash(TOKEN=$(cat /tmp/ayt_token.txt)
+      LEAD_ID=$(cat /tmp/ayt_lead_id.txt)…)
+  ⎿  {
+       "booking": {
+         "id": "627daf4d-d73a-4f46-b217-a823132655b5",
+     … +22 lines (ctrl+o to expand)
+  ⎿  Allowed by auto mode classifier
+
+⏺ Booking BK-2607-0002 created — Rp 7,000,000 total (2 pax × 3.5jt), source_id: 1 (Ads) auto-pulled from the lead.
+
+  Recap of the pattern:
+  1. POST /api/webhooks/whatsapp with X-Webhook-Secret header → simulates an inbound customer message (creates/updates the
+  lead + chat, direction: "in")
+  2. POST /api/leads/:id/chats with JWT + {"direction":"out", "body":"..."} → simulates the sales reply
+  3. Repeat step 1 for the customer's next message
+  4. POST /api/leads/:id/convert (or the UI's Convert modal) once you're ready to book it
+
+  You can reuse this same phone number (6281111222333) for more webhook calls — since the lead is still unconverted, each
+  one just appends to the same chat thread and lead instead of creating a duplicate.

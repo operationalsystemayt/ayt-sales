@@ -1,15 +1,21 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Plus, RotateCcw, Eye, ChevronLeft, ChevronRight, BookOpen, Users, DollarSign, Clock, Plane, CheckCircle } from 'lucide-react'
+import {
+  Plus, RotateCcw, Eye, ChevronLeft, ChevronRight, BookOpen, Users, DollarSign,
+  Clock, Plane, CheckCircle, Wallet, Trash2,
+} from 'lucide-react'
 import Layout from '../components/Layout/Layout'
 import Modal from '../components/ui/Modal'
 import Badge from '../components/ui/Badge'
 import Avatar from '../components/ui/Avatar'
+import EditableCell from '../components/ui/EditableCell'
+import { formatThousands, parseThousands } from '../utils/currency'
+import { BOOKING_STATUSES } from '../constants/bookingStatus'
 import {
   getBookings, getBookingSummary, createBooking, updateBooking,
-  getUsers, getProducts
+  getUsers, getProducts, getCountries, getPayments, addPayment, deletePayment,
 } from '../services/api'
-import type { Booking, BookingSummary, User, Product } from '../types'
-import { format } from 'date-fns'
+import type { Booking, BookingSummary, User, Product, Country, BookingPayment } from '../types'
+import { format, differenceInCalendarDays } from 'date-fns'
 import { id as idLocale } from 'date-fns/locale'
 
 const fmtDate = (d?: string) => d ? format(new Date(d), 'dd MMM yyyy', { locale: idLocale }) : '-'
@@ -17,10 +23,33 @@ const fmtRp = (n: number) => n >= 1_000_000 ? `Rp ${(n / 1_000_000).toFixed(1).r
 
 const PAGE_SIZE = 20
 
-const BOOKING_STATUSES = [
-  'Waiting Payment 1','Waiting Payment 2','Waiting Payment 3',
-  'Waiting Passport','Waiting Visa','Ticketing','Ready to Depart','Completed','Cancelled'
-]
+const PAYMENT_LABELS = ['DP', 'Payment 1', 'Payment 2', 'Payment 3', 'Custom']
+
+type TripStatus = 'Belum Berangkat' | 'Dalam Perjalanan' | 'Selesai' | '-'
+
+function tripStatus(b: Booking): TripStatus {
+  if (!b.departure_date) return '-'
+  const start = new Date(b.departure_date)
+  const end = new Date(start)
+  end.setDate(end.getDate() + Math.max(b.product?.duration_days ?? 1, 1))
+  const now = new Date()
+  if (now < start) return 'Belum Berangkat'
+  if (now <= end) return 'Dalam Perjalanan'
+  return 'Selesai'
+}
+
+const tripStatusStyle: Record<TripStatus, string> = {
+  'Belum Berangkat': 'text-gray-600 bg-gray-100',
+  'Dalam Perjalanan': 'text-blue-600 bg-blue-50',
+  'Selesai': 'text-green-600 bg-green-50',
+  '-': 'text-gray-300 bg-transparent',
+}
+
+function isUnpaidSoon(b: Booking): boolean {
+  if (b.remaining_payment <= 0 || !b.departure_date) return false
+  const daysUntil = differenceInCalendarDays(new Date(b.departure_date), new Date())
+  return daysUntil <= 30
+}
 
 export default function BookingPage() {
   const [bookings, setBookings] = useState<Booking[]>([])
@@ -32,11 +61,17 @@ export default function BookingPage() {
 
   const [users, setUsers] = useState<User[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [countries, setCountries] = useState<Country[]>([])
 
   const [form, setForm] = useState({
-    customer_name: '', phone: '', sales_id: '', product_id: '',
+    customer_name: '', phone: '', sales_id: '', product_id: '', country_id: '',
     departure_date: '', pax: '1', price_per_pax: '', booking_status: 'Waiting Payment 1', notes: ''
   })
+
+  // Payment modal
+  const [showPayments, setShowPayments] = useState<Booking | null>(null)
+  const [payments, setPayments] = useState<BookingPayment[]>([])
+  const [paymentForm, setPaymentForm] = useState({ amount: '', label: 'DP', customLabel: '' })
 
   const loadData = useCallback(async () => {
     const params: Record<string, string> = {}
@@ -47,8 +82,8 @@ export default function BookingPage() {
   }, [filters])
 
   useEffect(() => {
-    Promise.all([getUsers(), getProducts()]).then(([u, p]) => {
-      setUsers(u.data); setProducts(p.data)
+    Promise.all([getUsers(), getProducts(), getCountries()]).then(([u, p, c]) => {
+      setUsers(u.data); setProducts(p.data); setCountries(c.data)
     })
   }, [])
 
@@ -61,11 +96,12 @@ export default function BookingPage() {
     await createBooking({
       ...form,
       product_id: Number(form.product_id),
+      country_id: form.country_id ? Number(form.country_id) : undefined,
       pax: Number(form.pax),
       price_per_pax: Number(form.price_per_pax) * 1_000_000,
     })
     setShowAdd(false)
-    setForm({ customer_name:'', phone:'', sales_id:'', product_id:'', departure_date:'', pax:'1', price_per_pax:'', booking_status:'Waiting Payment 1', notes:'' })
+    setForm({ customer_name:'', phone:'', sales_id:'', product_id:'', country_id:'', departure_date:'', pax:'1', price_per_pax:'', booking_status:'Waiting Payment 1', notes:'' })
     loadData()
   }
 
@@ -74,10 +110,44 @@ export default function BookingPage() {
     loadData()
   }
 
+  const handleFieldUpdate = async (id: string, field: string, value: string | number | null) => {
+    await updateBooking(id, { [field]: value })
+    loadData()
+  }
+
+  const openPayments = async (booking: Booking) => {
+    setShowPayments(booking)
+    setPaymentForm({ amount: '', label: 'DP', customLabel: '' })
+    const res = await getPayments(booking.id)
+    setPayments(res.data)
+  }
+
+  const handleAddPayment = async () => {
+    if (!showPayments || !paymentForm.amount) return
+    const label = paymentForm.label === 'Custom' ? paymentForm.customLabel : paymentForm.label
+    if (!label) return
+    await addPayment(showPayments.id, { amount: parseThousands(paymentForm.amount), notes: label })
+    const res = await getPayments(showPayments.id)
+    setPayments(res.data)
+    setPaymentForm({ amount: '', label: 'DP', customLabel: '' })
+    loadData()
+  }
+
+  const handleDeletePayment = async (paymentId: number) => {
+    if (!showPayments) return
+    await deletePayment(showPayments.id, paymentId)
+    const res = await getPayments(showPayments.id)
+    setPayments(res.data)
+    loadData()
+  }
+
+  const paymentsTotalDibayar = payments.reduce((sum, p) => sum + p.amount, 0)
+  const paymentsSisaTagihan = (showPayments?.total_price ?? 0) - paymentsTotalDibayar
+
   const summaryCards = summary ? [
     { label: 'Total Booking', value: summary.total_booking, sub: 'Semua Booking', icon: BookOpen, color: 'text-blue-600 bg-blue-50' },
     { label: 'Total Pax', value: summary.total_pax, sub: 'Orang', icon: Users, color: 'text-green-600 bg-green-50' },
-    { label: 'Total Revenue', value: fmtRp(summary.total_revenue), sub: 'Semua Booking', icon: DollarSign, color: 'text-purple-600 bg-purple-50' },
+    { label: 'Total Revenue', value: fmtRp(summary.total_revenue), sub: 'Sesuai Filter', icon: DollarSign, color: 'text-purple-600 bg-purple-50' },
     { label: 'Menunggu Pembayaran', value: fmtRp(summary.pending_payment), sub: `${bookings.filter(b=>b.remaining_payment>0).length} Booking`, icon: Clock, color: 'text-orange-600 bg-orange-50' },
     { label: 'Akan Berangkat', value: summary.upcoming_30_days, sub: 'Dalam 30 Hari', icon: Plane, color: 'text-cyan-600 bg-cyan-50' },
     { label: 'Selesai', value: summary.completed, sub: 'Booking', icon: CheckCircle, color: 'text-teal-600 bg-teal-50' },
@@ -127,9 +197,11 @@ export default function BookingPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100">
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase w-8">Aksi</th>
+                <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase">Sales</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">No. Booking</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tgl Lead Prospect</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tgl Booking</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration to Book</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">No. HP</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Produk</th>
@@ -137,37 +209,51 @@ export default function BookingPage() {
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Keberangkatan</th>
                 <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Pax</th>
                 <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Harga</th>
+                <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase">Pembayaran</th>
                 <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Sisa Tagihan</th>
                 <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase">Status</th>
-                <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase">Sales</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Catatan</th>
+                <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase">Aksi</th>
+                <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase">Status Keberangkatan</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {pagedBookings.map((b) => (
+              {pagedBookings.map((b) => {
+                const duration = b.lead?.date_received
+                  ? differenceInCalendarDays(new Date(b.booking_date), new Date(b.lead.date_received))
+                  : null
+                const trip = tripStatus(b)
+                return (
                 <tr key={b.id} className="hover:bg-gray-50/50 transition-colors">
-                  <td className="px-3 py-3">
-                    <button onClick={() => setShowDetail(b)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition">
-                      <Eye className="w-4 h-4" />
-                    </button>
+                  <td className="px-3 py-3 text-center">
+                    {b.sales ? <Avatar name={b.sales.full_name} src={b.sales.avatar} /> : '-'}
                   </td>
                   <td className="px-3 py-3">
                     <span className="font-semibold text-blue-600">{b.booking_no}</span>
                   </td>
+                  <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{fmtDate(b.lead?.date_received)}</td>
                   <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{fmtDate(b.booking_date)}</td>
+                  <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{duration !== null ? `${duration} hari` : '-'}</td>
                   <td className="px-3 py-3 font-semibold text-gray-900">{b.customer?.full_name ?? '-'}</td>
                   <td className="px-3 py-3 text-gray-600">{b.customer?.phone ?? '-'}</td>
                   <td className="px-3 py-3 text-gray-700">{b.product?.product_name ?? '-'}</td>
                   <td className="px-3 py-3">
-                    {b.product?.country ? (
-                      <span className="flex items-center gap-1">
-                        <span>{b.product.country.flag_url}</span>
-                        <span className="text-gray-600">{b.product.country.name}</span>
-                      </span>
-                    ) : '-'}
+                    <EditableCell
+                      value={String(b.country_id ?? '')}
+                      type="select"
+                      options={countries.map((c) => ({ id: c.id, label: `${c.flag_url} ${c.name}` }))}
+                      onSave={(v) => handleFieldUpdate(b.id, 'country_id', v ? Number(v) : null)}
+                      renderValue={() => b.country ? <span>{b.country.flag_url} {b.country.name}</span> : <span className="text-gray-300">-</span>}
+                    />
                   </td>
                   <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{fmtDate(b.departure_date)}</td>
                   <td className="px-3 py-3 text-right text-gray-700">{b.pax}</td>
                   <td className="px-3 py-3 text-right font-medium text-gray-800">{fmtRp(b.total_price)}</td>
+                  <td className="px-3 py-3 text-center">
+                    <button title="Pembayaran" onClick={() => openPayments(b)} className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition">
+                      <Wallet className="w-4 h-4" />
+                    </button>
+                  </td>
                   <td className="px-3 py-3 text-right">
                     <span className={b.remaining_payment > 0 ? 'text-orange-600 font-medium' : 'text-green-600 font-medium'}>
                       {b.remaining_payment > 0 ? fmtRp(b.remaining_payment) : 'Lunas'}
@@ -182,13 +268,21 @@ export default function BookingPage() {
                       {BOOKING_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                   </td>
+                  <td className="px-3 py-3 max-w-40">
+                    <EditableCell value={b.notes ?? ''} onSave={(v) => handleFieldUpdate(b.id, 'notes', v)} />
+                  </td>
                   <td className="px-3 py-3 text-center">
-                    {b.sales ? <Avatar name={b.sales.full_name} src={b.sales.avatar} /> : '-'}
+                    <button onClick={() => setShowDetail(b)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition">
+                      <Eye className="w-4 h-4" />
+                    </button>
+                  </td>
+                  <td className="px-3 py-3 text-center">
+                    <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${tripStatusStyle[trip]}`}>{trip}</span>
                   </td>
                 </tr>
-              ))}
+              )})}
               {pagedBookings.length === 0 && (
-                <tr><td colSpan={13} className="text-center py-12 text-gray-400">Tidak ada data booking</td></tr>
+                <tr><td colSpan={18} className="text-center py-12 text-gray-400">Tidak ada data booking</td></tr>
               )}
             </tbody>
           </table>
@@ -220,6 +314,7 @@ export default function BookingPage() {
             { label: 'No. HP *', key: 'phone', type: 'text', placeholder: '0812-3456-7890' },
             { label: 'Sales', key: 'sales_id', type: 'select', options: users.filter(u=>u.role==='sales').map(u=>({id:u.id,name:u.full_name})) },
             { label: 'Produk *', key: 'product_id', type: 'select', options: products.map(p=>({id:p.id,name:p.product_name})) },
+            { label: 'Negara (opsional)', key: 'country_id', type: 'select', options: countries.map(c=>({id:c.id,name:`${c.flag_url} ${c.name}`})) },
             { label: 'Tanggal Keberangkatan *', key: 'departure_date', type: 'date' },
             { label: 'Jumlah Pax *', key: 'pax', type: 'number', placeholder: '1' },
             { label: 'Harga per Pax (jt) *', key: 'price_per_pax', type: 'number', placeholder: '14.9' },
@@ -261,22 +356,107 @@ export default function BookingPage() {
         </div>
       </Modal>
 
+      {/* Payment Modal */}
+      <Modal open={!!showPayments} onClose={() => setShowPayments(null)} title={`Pembayaran - ${showPayments?.booking_no}`} size="md">
+        {showPayments && (
+          <div className="p-6">
+            <div className="space-y-2 max-h-56 overflow-y-auto mb-4">
+              {payments.map((p) => (
+                <div key={p.id} className="flex items-center justify-between bg-gray-50 rounded-xl px-3 py-2">
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">{p.notes || `Pembayaran ${p.payment_no}`}</p>
+                    <p className="text-xs text-gray-400">{fmtDate(p.payment_date) !== '-' ? fmtDate(p.payment_date) : fmtDate(p.created_at)}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-semibold text-gray-800">{fmtRp(p.amount)}</span>
+                    <button onClick={() => handleDeletePayment(p.id)} className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {payments.length === 0 && <p className="text-center text-gray-400 text-sm py-6">Belum ada pembayaran</p>}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 bg-blue-50 rounded-xl p-3 mb-4">
+              <div>
+                <p className="text-xs text-gray-500">Total Dibayar</p>
+                <p className="text-sm font-bold text-blue-700">{fmtRp(paymentsTotalDibayar)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Sisa Tagihan</p>
+                <p className={`text-sm font-bold ${paymentsSisaTagihan > 0 ? 'text-orange-600' : 'text-green-600'}`}>
+                  {paymentsSisaTagihan > 0 ? fmtRp(paymentsSisaTagihan) : 'Lunas'}
+                </p>
+              </div>
+            </div>
+
+            <h4 className="text-sm font-semibold text-gray-700 mb-2">Tambah Pembayaran</h4>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Harga</label>
+                <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+                  placeholder="1.000.000"
+                  value={paymentForm.amount}
+                  onChange={(e) => setPaymentForm({ ...paymentForm, amount: formatThousands(e.target.value) })} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Catatan</label>
+                <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+                  value={paymentForm.label}
+                  onChange={(e) => setPaymentForm({ ...paymentForm, label: e.target.value })}>
+                  {PAYMENT_LABELS.map((l) => <option key={l} value={l}>{l}</option>)}
+                </select>
+              </div>
+              {paymentForm.label === 'Custom' && (
+                <div className="col-span-2">
+                  <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+                    placeholder="Catatan custom..."
+                    value={paymentForm.customLabel}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, customLabel: e.target.value })} />
+                </div>
+              )}
+            </div>
+            <button onClick={handleAddPayment} className="w-full mt-4 py-2.5 bg-blue-600 text-white text-sm rounded-xl hover:bg-blue-700 font-medium">
+              Tambah Pembayaran
+            </button>
+          </div>
+        )}
+      </Modal>
+
       {/* Detail Modal */}
       <Modal open={!!showDetail} onClose={() => setShowDetail(null)} title={`Detail Booking - ${showDetail?.booking_no}`} size="md">
         {showDetail && (
           <div className="p-6 space-y-4">
+            {isUnpaidSoon(showDetail) && (
+              <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl px-3 py-2">
+                ⚠️ Pembayaran belum lunas — keberangkatan kurang dari 1 bulan lagi.
+              </div>
+            )}
+            {tripStatus(showDetail) === 'Dalam Perjalanan' && (
+              <div className="bg-blue-50 border border-blue-200 text-blue-700 text-xs rounded-xl px-3 py-2">
+                ✈️ Sedang dalam perjalanan.
+              </div>
+            )}
+            {tripStatus(showDetail) === 'Selesai' && (
+              <div className="bg-green-50 border border-green-200 text-green-700 text-xs rounded-xl px-3 py-2">
+                ✅ Perjalanan telah selesai.
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-4">
               {[
                 ['Customer', showDetail.customer?.full_name ?? '-'],
                 ['No. HP', showDetail.customer?.phone ?? '-'],
                 ['Produk', showDetail.product?.product_name ?? '-'],
-                ['Negara', showDetail.product?.country?.name ?? '-'],
+                ['Negara', showDetail.country?.name ?? showDetail.product?.country?.name ?? '-'],
+                ['Tgl Lead Prospect', fmtDate(showDetail.lead?.date_received)],
                 ['Keberangkatan', fmtDate(showDetail.departure_date)],
                 ['Pax', String(showDetail.pax)],
                 ['Harga/Pax', fmtRp(showDetail.price_per_pax)],
                 ['Total Harga', fmtRp(showDetail.total_price)],
                 ['Total Dibayar', fmtRp(showDetail.total_paid)],
                 ['Sisa Tagihan', fmtRp(showDetail.remaining_payment)],
+                ['Status Keberangkatan', tripStatus(showDetail)],
               ].map(([label, val]) => (
                 <div key={label}>
                   <p className="text-xs text-gray-400">{label}</p>

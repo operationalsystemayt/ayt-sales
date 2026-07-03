@@ -45,3 +45,23 @@ func AuthMiddleware() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+func RequireRole(role string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if r, _ := c.Get("role"); r != role {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
+		c.Next()
+	}
+}
+
+func WebhookSecret(secret string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if got := c.GetHeader("X-Webhook-Secret"); got == "" || got != secret {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid webhook secret"})
+			return
+		}
+		c.Next()
+	}
+}

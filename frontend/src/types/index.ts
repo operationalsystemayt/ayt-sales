@@ -61,9 +61,26 @@ export interface Lead {
   deal_date?: string
   follow_up_date?: string
   last_chat_at?: string
+  notes?: string
   is_converted: boolean
   created_at: string
   updated_at: string
+}
+
+export interface Chat {
+  id: string
+  lead_id: string
+  customer_id: string
+  direction: 'in' | 'out'
+  from_phone?: string
+  body: string
+  chat_timestamp: string
+  created_at: string
+}
+
+export interface Settings {
+  dormant_hours: string
+  close_hours: string
 }
 
 export interface Booking {
@@ -76,6 +93,13 @@ export interface Booking {
   sales?: User
   product_id?: number
   product?: Product
+  group_id?: number
+  group?: ProductGroup
+  source_id?: number
+  source?: MasterSource
+  country_id?: number
+  country?: Country
+  lead?: Lead
   booking_date: string
   departure_date?: string
   pax: number

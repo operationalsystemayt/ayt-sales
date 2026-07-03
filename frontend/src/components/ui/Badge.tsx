@@ -13,6 +13,7 @@ const statusMap: Record<string, { className: string }> = {
   'Need Response':    { className: 'text-red-600 bg-red-50 border border-red-200' },
   'Waiting Customer': { className: 'text-yellow-600 bg-yellow-50 border border-yellow-200' },
   Dormant:            { className: 'text-gray-500 bg-gray-100 border border-gray-200' },
+  Close:              { className: 'text-white bg-gray-800 border border-gray-800' },
 }
 
 const groupMap: Record<string, string> = {

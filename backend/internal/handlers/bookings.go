@@ -9,6 +9,7 @@ import (
 	"github.com/ayt-sales/backend/internal/models"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 func GetBookings(c *gin.Context) {
@@ -17,6 +18,8 @@ func GetBookings(c *gin.Context) {
 		Preload("Customer").
 		Preload("Sales").
 		Preload("Product.Country").
+		Preload("Country").
+		Preload("Lead").
 		Order("created_at DESC")
 
 	if salesID := c.Query("sales_id"); salesID != "" {
@@ -39,6 +42,28 @@ func GetBookings(c *gin.Context) {
 	c.JSON(http.StatusOK, bookings)
 }
 
+// bookingSummaryFilters applies the same filter set GetBookings supports, so the
+// summary cards always reflect exactly the rows currently visible in the table.
+func bookingSummaryFilters(c *gin.Context) *gorm.DB {
+	q := database.DB.Model(&models.Booking{})
+	if salesID := c.Query("sales_id"); salesID != "" {
+		q = q.Where("sales_id = ?", salesID)
+	}
+	if status := c.Query("status"); status != "" {
+		q = q.Where("booking_status = ?", status)
+	}
+	if productID := c.Query("product_id"); productID != "" {
+		q = q.Where("product_id = ?", productID)
+	}
+	if dateFrom := c.Query("date_from"); dateFrom != "" {
+		q = q.Where("booking_date >= ?", dateFrom)
+	}
+	if dateTo := c.Query("date_to"); dateTo != "" {
+		q = q.Where("booking_date <= ?", dateTo)
+	}
+	return q
+}
+
 func GetBookingSummary(c *gin.Context) {
 	var totalBooking int64
 	var totalPax struct{ Sum int64 }
@@ -47,33 +72,22 @@ func GetBookingSummary(c *gin.Context) {
 	var completed int64
 	var upcoming int64
 
-	db := database.DB.Model(&models.Booking{})
-
-	dateFrom := c.Query("date_from")
-	dateTo := c.Query("date_to")
-	if dateFrom != "" {
-		db = db.Where("booking_date >= ?", dateFrom)
-	}
-	if dateTo != "" {
-		db = db.Where("booking_date <= ?", dateTo)
-	}
-
-	db.Count(&totalBooking)
-	database.DB.Model(&models.Booking{}).Select("COALESCE(SUM(pax), 0) as sum").Scan(&totalPax)
-	database.DB.Model(&models.Booking{}).Select("COALESCE(SUM(total_paid), 0) as sum").Scan(&totalRevenue)
-	database.DB.Model(&models.Booking{}).Where("remaining_payment > 0").Select("COALESCE(SUM(remaining_payment), 0) as sum").Scan(&pendingPayment)
-	database.DB.Model(&models.Booking{}).Where("booking_status = ?", "Completed").Count(&completed)
-	database.DB.Model(&models.Booking{}).
+	bookingSummaryFilters(c).Count(&totalBooking)
+	bookingSummaryFilters(c).Select("COALESCE(SUM(pax), 0) as sum").Scan(&totalPax)
+	bookingSummaryFilters(c).Select("COALESCE(SUM(total_paid), 0) as sum").Scan(&totalRevenue)
+	bookingSummaryFilters(c).Where("remaining_payment > 0").Select("COALESCE(SUM(remaining_payment), 0) as sum").Scan(&pendingPayment)
+	bookingSummaryFilters(c).Where("booking_status = ?", "Completed").Count(&completed)
+	bookingSummaryFilters(c).
 		Where("departure_date BETWEEN ? AND ?", time.Now(), time.Now().AddDate(0, 0, 30)).
 		Count(&upcoming)
 
 	c.JSON(http.StatusOK, gin.H{
-		"total_booking":     totalBooking,
-		"total_pax":         totalPax.Sum,
-		"total_revenue":     totalRevenue.Sum,
-		"pending_payment":   pendingPayment.Sum,
-		"completed":         completed,
-		"upcoming_30_days":  upcoming,
+		"total_booking":    totalBooking,
+		"total_pax":        totalPax.Sum,
+		"total_revenue":    totalRevenue.Sum,
+		"pending_payment":  pendingPayment.Sum,
+		"completed":        completed,
+		"upcoming_30_days": upcoming,
 	})
 }
 
@@ -81,7 +95,9 @@ type CreateBookingRequest struct {
 	CustomerName  string  `json:"customer_name" binding:"required"`
 	Phone         string  `json:"phone" binding:"required"`
 	SalesID       string  `json:"sales_id"`
+	LeadID        string  `json:"lead_id"`
 	ProductID     uint    `json:"product_id" binding:"required"`
+	CountryID     *uint   `json:"country_id"`
 	DepartureDate string  `json:"departure_date" binding:"required"`
 	Pax           int     `json:"pax" binding:"required,min=1"`
 	PricePerPax   float64 `json:"price_per_pax" binding:"required"`
@@ -120,13 +136,28 @@ func CreateBooking(c *gin.Context) {
 		sid, _ := uuid.Parse(req.SalesID)
 		salesID = &sid
 	}
+	var leadID *uuid.UUID
+	if req.LeadID != "" {
+		lid, _ := uuid.Parse(req.LeadID)
+		leadID = &lid
+	}
+
+	countryID := req.CountryID
+	if countryID == nil {
+		var product models.Product
+		if err := database.DB.First(&product, req.ProductID).Error; err == nil {
+			countryID = product.CountryID
+		}
+	}
 
 	booking := models.Booking{
 		ID:               uuid.New(),
 		BookingNo:        bookingNo,
 		CustomerID:       customer.ID,
 		SalesID:          salesID,
+		LeadID:           leadID,
 		ProductID:        &req.ProductID,
+		CountryID:        countryID,
 		BookingDate:      now,
 		DepartureDate:    &departureDate,
 		Pax:              req.Pax,
@@ -142,13 +173,14 @@ func CreateBooking(c *gin.Context) {
 		return
 	}
 
-	database.DB.Preload("Customer").Preload("Sales").Preload("Product.Country").First(&booking, "id = ?", booking.ID)
+	database.DB.Preload("Customer").Preload("Sales").Preload("Product.Country").Preload("Country").Preload("Lead").First(&booking, "id = ?", booking.ID)
 	c.JSON(http.StatusCreated, booking)
 }
 
 type UpdateBookingRequest struct {
 	SalesID       *string  `json:"sales_id"`
 	ProductID     *uint    `json:"product_id"`
+	CountryID     *uint    `json:"country_id"`
 	DepartureDate *string  `json:"departure_date"`
 	Pax           *int     `json:"pax"`
 	PricePerPax   *float64 `json:"price_per_pax"`
@@ -176,6 +208,9 @@ func UpdateBooking(c *gin.Context) {
 	}
 	if req.ProductID != nil {
 		updates["product_id"] = req.ProductID
+	}
+	if req.CountryID != nil {
+		updates["country_id"] = req.CountryID
 	}
 	if req.Pax != nil {
 		updates["pax"] = req.Pax
@@ -212,7 +247,7 @@ func UpdateBooking(c *gin.Context) {
 	updates["remaining_payment"] = newTotal - booking.TotalPaid
 
 	database.DB.Model(&booking).Updates(updates)
-	database.DB.Preload("Customer").Preload("Sales").Preload("Product.Country").First(&booking, "id = ?", id)
+	database.DB.Preload("Customer").Preload("Sales").Preload("Product.Country").Preload("Country").Preload("Lead").First(&booking, "id = ?", id)
 	c.JSON(http.StatusOK, booking)
 }
 
@@ -280,4 +315,27 @@ func GetPayments(c *gin.Context) {
 	var payments []models.BookingPayment
 	database.DB.Where("booking_id = ?", bookingID).Order("payment_no").Find(&payments)
 	c.JSON(http.StatusOK, payments)
+}
+
+func DeletePayment(c *gin.Context) {
+	bookingID := c.Param("id")
+	paymentID := c.Param("paymentId")
+
+	var payment models.BookingPayment
+	if err := database.DB.Where("id = ? AND booking_id = ?", paymentID, bookingID).First(&payment).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Payment not found"})
+		return
+	}
+	database.DB.Delete(&payment)
+
+	var booking models.Booking
+	if err := database.DB.First(&booking, "id = ?", bookingID).Error; err == nil {
+		newPaid := booking.TotalPaid - payment.Amount
+		database.DB.Model(&booking).Updates(map[string]interface{}{
+			"total_paid":        newPaid,
+			"remaining_payment": booking.TotalPrice - newPaid,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Payment deleted"})
 }

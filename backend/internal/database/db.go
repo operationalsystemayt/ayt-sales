@@ -50,6 +50,8 @@ func migrate(db *gorm.DB) {
 		&models.Customer{},
 		&models.Lead{},
 		&models.LeadActivity{},
+		&models.Chat{},
+		&models.Setting{},
 		&models.Booking{},
 		&models.BookingPayment{},
 	)
@@ -60,6 +62,11 @@ func migrate(db *gorm.DB) {
 }
 
 func seed(db *gorm.DB) {
+	// Idempotent backfills for already-provisioned databases (run every startup)
+	db.Model(&models.MasterResult{}).Where("name = ?", "Deal").Update("name", "Converted")
+	seedSettings(db)
+	seedCloseStatus(db)
+
 	var count int64
 	db.Model(&models.MasterSource{}).Count(&count)
 	if count > 0 {
@@ -83,10 +90,11 @@ func seed(db *gorm.DB) {
 		{Name: "Need Response", Color: "red"},
 		{Name: "Waiting Customer", Color: "yellow"},
 		{Name: "Dormant", Color: "gray"},
+		{Name: "Close", Color: "black"},
 	}
 	db.Create(&statuses)
 
-	results := []models.MasterResult{{Name: "Belum"}, {Name: "Deal"}, {Name: "Cancel"}}
+	results := []models.MasterResult{{Name: "Belum"}, {Name: "Cancel"}, {Name: "Converted"}}
 	db.Create(&results)
 
 	groups := []models.ProductGroup{{Name: "Open Trip"}, {Name: "Private Trip"}}
@@ -133,4 +141,31 @@ func seed(db *gorm.DB) {
 	db.Create(&countries)
 
 	log.Println("Database seeded successfully")
+}
+
+func seedSettings(db *gorm.DB) {
+	// Migrate the old single-threshold key (pre Dormant/Close split) if present.
+	var old models.Setting
+	if err := db.Where("key = ?", "waiting_customer_hours").First(&old).Error; err == nil {
+		var dormant models.Setting
+		if err := db.Where("key = ?", "dormant_hours").First(&dormant).Error; err != nil {
+			db.Create(&models.Setting{Key: "dormant_hours", Value: old.Value})
+		}
+		db.Delete(&old)
+	}
+
+	defaults := map[string]string{"dormant_hours": "12", "close_hours": "72"}
+	for k, v := range defaults {
+		var s models.Setting
+		if err := db.Where("key = ?", k).First(&s).Error; err != nil {
+			db.Create(&models.Setting{Key: k, Value: v})
+		}
+	}
+}
+
+func seedCloseStatus(db *gorm.DB) {
+	var s models.MasterStatus
+	if err := db.Where("name = ?", "Close").First(&s).Error; err != nil {
+		db.Create(&models.MasterStatus{Name: "Close", Color: "black"})
+	}
 }

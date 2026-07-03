@@ -4,13 +4,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ayt-sales/backend/internal/config"
 	"github.com/ayt-sales/backend/internal/handlers"
 	"github.com/ayt-sales/backend/internal/middleware"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
-func Setup() *gin.Engine {
+func Setup(cfg *config.Config) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
 
@@ -47,6 +48,9 @@ func Setup() *gin.Engine {
 	// Auth
 	api.POST("/auth/login", handlers.Login)
 
+	// Public webhook (no JWT — called by WhatsApp/Meta infra, gated by shared secret)
+	api.POST("/webhooks/whatsapp", middleware.WebhookSecret(cfg.WebhookSecret), handlers.WhatsAppWebhook)
+
 	// Protected routes
 	auth := api.Group("/")
 	auth.Use(middleware.AuthMiddleware())
@@ -65,17 +69,25 @@ func Setup() *gin.Engine {
 		auth.GET("/master/results", handlers.GetMasterResults)
 		auth.GET("/countries", handlers.GetCountries)
 		auth.GET("/product-groups", handlers.GetProductGroups)
+		auth.POST("/product-groups", handlers.CreateProductGroup)
+		auth.PUT("/product-groups/:id", handlers.UpdateProductGroup)
+		auth.DELETE("/product-groups/:id", handlers.DeleteProductGroup)
 		auth.GET("/products", handlers.GetProducts)
 		auth.POST("/products", handlers.CreateProduct)
+		auth.PUT("/products/:id", handlers.UpdateProduct)
+		auth.DELETE("/products/:id", handlers.DeleteProduct)
 		auth.GET("/departures", handlers.GetDepartures)
 
 		// Leads
 		auth.GET("/leads", handlers.GetLeads)
 		auth.POST("/leads", handlers.CreateLead)
 		auth.PUT("/leads/bulk", handlers.BulkUpdateLeads)
+		auth.GET("/leads/:id", handlers.GetLead)
 		auth.PUT("/leads/:id", handlers.UpdateLead)
 		auth.DELETE("/leads/:id", handlers.DeleteLead)
 		auth.POST("/leads/:id/convert", handlers.ConvertLeadToBooking)
+		auth.GET("/leads/:id/chats", handlers.GetLeadChats)
+		auth.POST("/leads/:id/chats", handlers.CreateLeadChat)
 
 		// Bookings
 		auth.GET("/bookings", handlers.GetBookings)
@@ -85,6 +97,7 @@ func Setup() *gin.Engine {
 		auth.DELETE("/bookings/:id", handlers.DeleteBooking)
 		auth.GET("/bookings/:id/payments", handlers.GetPayments)
 		auth.POST("/bookings/:id/payments", handlers.AddPayment)
+		auth.DELETE("/bookings/:id/payments/:paymentId", handlers.DeletePayment)
 
 		// Dashboard
 		auth.GET("/dashboard/summary", handlers.GetDashboardSummary)
@@ -92,6 +105,14 @@ func Setup() *gin.Engine {
 		auth.GET("/dashboard/top-products", handlers.GetDashboardTopProducts)
 		auth.GET("/dashboard/chart", handlers.GetDashboardChart)
 		auth.GET("/dashboard/top-trips", handlers.GetTopTrips)
+
+		// Settings (admin only)
+		settings := auth.Group("/settings")
+		settings.Use(middleware.RequireRole("admin"))
+		{
+			settings.GET("", handlers.GetSettings)
+			settings.PUT("", handlers.UpdateSettings)
+		}
 	}
 
 	return r

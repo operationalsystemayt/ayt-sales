@@ -1,13 +1,14 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, Users, BookOpen, Settings, TrendingUp, LogOut, Plane } from 'lucide-react'
+import { LayoutDashboard, Users, BookOpen, Package, TrendingUp, LogOut, Plane, SlidersHorizontal } from 'lucide-react'
 import { useAuthStore } from '../../store/auth'
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/leads', icon: Users, label: 'Leads & Deals' },
+  { to: '/leads', icon: Users, label: 'Leads & Prospects' },
   { to: '/booking', icon: BookOpen, label: 'Booking' },
   { to: '/report', icon: TrendingUp, label: 'Report' },
-  { to: '/settings', icon: Settings, label: 'Setup' },
+  { to: '/setup', icon: Package, label: 'Setup' },
+  { to: '/settings', icon: SlidersHorizontal, label: 'Pengaturan' },
 ]
 
 export default function Sidebar() {

@@ -15,7 +15,7 @@ func main() {
 
 	database.Connect(cfg)
 
-	r := router.Setup()
+	r := router.Setup(cfg)
 
 	log.Printf("Server running on :%s", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {
