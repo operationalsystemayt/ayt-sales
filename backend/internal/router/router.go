@@ -48,18 +48,20 @@ func Setup(cfg *config.Config) *gin.Engine {
 	// Auth
 	api.POST("/auth/login", handlers.Login)
 
-	// Public webhook (no JWT — called by WhatsApp/Meta infra, gated by shared secret)
+	// Public webhooks (no JWT — called by WhatsApp/Meta or WAHA infra, gated by shared secret)
 	api.POST("/webhooks/whatsapp", middleware.WebhookSecret(cfg.WebhookSecret), handlers.WhatsAppWebhook)
+	api.POST("/webhooks/waha", middleware.WebhookSecret(cfg.WebhookSecret), handlers.WahaWebhook)
 
 	// Protected routes
 	auth := api.Group("/")
 	auth.Use(middleware.AuthMiddleware())
+	auth.Use(middleware.RequireNotViewer())
 	{
 		auth.GET("/auth/me", handlers.Me)
 
 		// Users / Sales
 		auth.GET("/users", handlers.GetUsers)
-		auth.POST("/users", handlers.CreateUser)
+		auth.POST("/users", middleware.RequireRole("admin"), handlers.CreateUser)
 
 		// Master data
 		auth.GET("/master/sources", handlers.GetMasterSources)
@@ -80,6 +82,7 @@ func Setup(cfg *config.Config) *gin.Engine {
 
 		// Leads
 		auth.GET("/leads", handlers.GetLeads)
+		auth.GET("/leads/summary", handlers.GetLeadsSummary)
 		auth.POST("/leads", handlers.CreateLead)
 		auth.PUT("/leads/bulk", handlers.BulkUpdateLeads)
 		auth.GET("/leads/:id", handlers.GetLead)
@@ -88,6 +91,23 @@ func Setup(cfg *config.Config) *gin.Engine {
 		auth.POST("/leads/:id/convert", handlers.ConvertLeadToBooking)
 		auth.GET("/leads/:id/chats", handlers.GetLeadChats)
 		auth.POST("/leads/:id/chats", handlers.CreateLeadChat)
+		auth.POST("/leads/:id/chats/read", handlers.MarkChatRead)
+		auth.POST("/leads/:id/chats/sync", handlers.SyncLeadChats)
+		auth.POST("/leads/:id/archive", handlers.ArchiveLead)
+		auth.POST("/leads/:id/unarchive", handlers.UnarchiveLead)
+		auth.GET("/leads/:id/activities", handlers.GetLeadActivities)
+		auth.POST("/leads/:id/activities", handlers.CreateLeadActivity)
+
+		// Customers / Contact
+		auth.GET("/customers", handlers.GetCustomers)
+		auth.GET("/customers/summary", handlers.GetContactSummary)
+		auth.PUT("/customers/:id", handlers.UpdateCustomer)
+		auth.POST("/customers/:id/save", handlers.SaveCustomer)
+		auth.GET("/customers/:id/summary", handlers.GetCustomerSummary)
+
+		// Chat inbox
+		auth.GET("/chats/inbox", handlers.GetChatInbox)
+		auth.GET("/chats/summary", handlers.GetChatSummary)
 
 		// Bookings
 		auth.GET("/bookings", handlers.GetBookings)
@@ -105,6 +125,9 @@ func Setup(cfg *config.Config) *gin.Engine {
 		auth.GET("/dashboard/top-products", handlers.GetDashboardTopProducts)
 		auth.GET("/dashboard/chart", handlers.GetDashboardChart)
 		auth.GET("/dashboard/top-trips", handlers.GetTopTrips)
+
+		// Reports
+		auth.GET("/reports/sales", handlers.GetReportSales)
 
 		// Settings (admin only)
 		settings := auth.Group("/settings")

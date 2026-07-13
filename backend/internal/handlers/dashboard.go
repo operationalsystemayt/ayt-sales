@@ -50,12 +50,12 @@ func GetDashboardSummary(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"penjualan":   totalRevenue.Sum,
-		"leads":       totalLeads,
-		"pemesan":     totalPemesan,
-		"peserta":     totalPeserta.Sum,
-		"cr_pemesan":  crPemesan,
-		"cr_peserta":  crPeserta,
+		"penjualan":  totalRevenue.Sum,
+		"leads":      totalLeads,
+		"pemesan":    totalPemesan,
+		"peserta":    totalPeserta.Sum,
+		"cr_pemesan": crPemesan,
+		"cr_peserta": crPeserta,
 	})
 }
 
@@ -70,11 +70,11 @@ func GetDashboardLeaderboard(c *gin.Context) {
 	}
 
 	type LeaderboardRow struct {
-		SalesID   string  `json:"sales_id"`
-		FullName  string  `json:"full_name"`
-		Avatar    string  `json:"avatar"`
-		TotalPax  int64   `json:"total_pax"`
-		Revenue   float64 `json:"revenue"`
+		SalesID  string  `json:"sales_id"`
+		FullName string  `json:"full_name"`
+		Avatar   string  `json:"avatar"`
+		TotalPax int64   `json:"total_pax"`
+		Revenue  float64 `json:"revenue"`
 	}
 
 	rows := make([]LeaderboardRow, 0)
@@ -113,18 +113,26 @@ func GetDashboardTopProducts(c *gin.Context) {
 		Revenue     float64 `json:"revenue"`
 	}
 
+	// Pax/revenue are aggregated per product in a subquery first, then joined to the
+	// product_countries many2many table — joining countries before aggregating would
+	// fan out the SUMs whenever a product has more than one country.
 	rows := make([]TopProductRow, 0)
 	database.DB.Raw(`
-		SELECT p.product_name, co.flag_url, co.name as country_name,
-		       COALESCE(SUM(b.pax), 0) as total_pax,
-		       COALESCE(SUM(b.total_paid), 0) as revenue
-		FROM bookings b
-		JOIN products p ON p.id = b.product_id
-		LEFT JOIN countries co ON co.id = p.country_id
-		WHERE b.booking_date BETWEEN ? AND ?
-		  AND b.deleted_at IS NULL
-		GROUP BY p.product_name, co.flag_url, co.name
-		ORDER BY revenue DESC
+		SELECT p.product_name,
+		       COALESCE(STRING_AGG(DISTINCT co.flag_url, ' '), '') as flag_url,
+		       COALESCE(STRING_AGG(DISTINCT co.name, ', '), '') as country_name,
+		       agg.total_pax, agg.revenue
+		FROM (
+			SELECT b.product_id, COALESCE(SUM(b.pax), 0) as total_pax, COALESCE(SUM(b.total_paid), 0) as revenue
+			FROM bookings b
+			WHERE b.booking_date BETWEEN ? AND ? AND b.deleted_at IS NULL
+			GROUP BY b.product_id
+		) agg
+		JOIN products p ON p.id = agg.product_id
+		LEFT JOIN product_countries pc ON pc.product_id = p.id
+		LEFT JOIN countries co ON co.id = pc.country_id
+		GROUP BY p.product_name, agg.total_pax, agg.revenue
+		ORDER BY agg.revenue DESC
 		LIMIT 5
 	`, dateFrom, dateTo).Scan(&rows)
 
@@ -148,12 +156,14 @@ func GetDashboardChart(c *gin.Context) {
 		Revenue float64 `json:"revenue"`
 	}
 
+	// Leads = sum of pax across leads received that day (a lead with pax unset/0 counts
+	// as 1 person). Closing = sum of pax across bookings made that day.
 	rows := make([]ChartRow, 0)
 	database.DB.Raw(`
 		SELECT
 			EXTRACT(DAY FROM gs.day)::int as day,
-			COALESCE((SELECT COUNT(*) FROM leads l WHERE DATE(l.date_received) = gs.day AND l.deleted_at IS NULL), 0) as leads,
-			COALESCE((SELECT COUNT(*) FROM bookings b WHERE DATE(b.booking_date) = gs.day AND b.deleted_at IS NULL), 0) as closing,
+			COALESCE((SELECT SUM(GREATEST(COALESCE(l.pax, 0), 1)) FROM leads l WHERE DATE(l.date_received) = gs.day AND l.deleted_at IS NULL), 0) as leads,
+			COALESCE((SELECT SUM(b.pax) FROM bookings b WHERE DATE(b.booking_date) = gs.day AND b.deleted_at IS NULL), 0) as closing,
 			COALESCE((SELECT SUM(b2.total_paid) FROM bookings b2 WHERE DATE(b2.booking_date) = gs.day AND b2.deleted_at IS NULL), 0) as revenue
 		FROM generate_series(?::date, ?::date, '1 day'::interval) AS gs(day)
 		ORDER BY gs.day

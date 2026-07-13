@@ -57,6 +57,7 @@ export const getDepartures = (productId?: number) =>
 
 // Leads
 export const getLeads = (params?: object) => api.get('/leads', { params })
+export const getLeadsSummary = (params?: object) => api.get('/leads/summary', { params })
 export const getLead = (id: string) => api.get(`/leads/${id}`)
 export const createLead = (data: object) => api.post('/leads', data)
 export const updateLead = (id: string, data: object) => api.put(`/leads/${id}`, data)
@@ -67,6 +68,24 @@ export const convertLeadToBooking = (id: string, data: object) =>
 export const getLeadChats = (leadId: string) => api.get(`/leads/${leadId}/chats`)
 export const createLeadChat = (leadId: string, data: { direction: 'in' | 'out'; body: string }) =>
   api.post(`/leads/${leadId}/chats`, data)
+export const markChatRead = (leadId: string) => api.post(`/leads/${leadId}/chats/read`)
+export const syncLeadChats = (leadId: string) => api.post(`/leads/${leadId}/chats/sync`)
+export const archiveLead = (leadId: string) => api.post(`/leads/${leadId}/archive`)
+export const unarchiveLead = (leadId: string) => api.post(`/leads/${leadId}/unarchive`)
+export const getLeadActivities = (leadId: string) => api.get(`/leads/${leadId}/activities`)
+export const createLeadActivity = (leadId: string, data: { activity: string; notes?: string }) =>
+  api.post(`/leads/${leadId}/activities`, data)
+
+// Customers / Contact
+export const getCustomers = (params?: object) => api.get('/customers', { params })
+export const updateCustomer = (id: string, data: object) => api.put(`/customers/${id}`, data)
+export const saveCustomer = (id: string) => api.post(`/customers/${id}/save`)
+export const getCustomerSummary = (id: string) => api.get(`/customers/${id}/summary`)
+export const getContactSummary = () => api.get('/customers/summary')
+
+// Chat inbox
+export const getChatInbox = (params?: object) => api.get('/chats/inbox', { params })
+export const getChatSummary = (params?: object) => api.get('/chats/summary', { params })
 
 // Settings
 export const getSettings = () => api.get('/settings')
@@ -90,5 +109,8 @@ export const getDashboardLeaderboard = (params?: object) => api.get('/dashboard/
 export const getDashboardTopProducts = (params?: object) => api.get('/dashboard/top-products', { params })
 export const getDashboardChart = (params?: object) => api.get('/dashboard/chart', { params })
 export const getTopTrips = (params?: object) => api.get('/dashboard/top-trips', { params })
+
+// Reports
+export const getReportSales = (params?: object) => api.get('/reports/sales', { params })
 
 export default api

@@ -8,8 +8,14 @@ import Modal from '../components/ui/Modal'
 import Badge from '../components/ui/Badge'
 import Avatar from '../components/ui/Avatar'
 import EditableCell from '../components/ui/EditableCell'
+import HargaCell from '../components/ui/HargaCell'
+import CountryMultiSelect from '../components/ui/CountryMultiSelect'
+import CountryEditCell from '../components/ui/CountryEditCell'
+import PeriodFilter from '../components/ui/PeriodFilter'
 import { formatThousands, parseThousands } from '../utils/currency'
 import { BOOKING_STATUSES } from '../constants/bookingStatus'
+import { getDateRange, fmtISODate, type Period } from '../utils/dateRange'
+import { useCanEdit } from '../hooks/useCanEdit'
 import {
   getBookings, getBookingSummary, createBooking, updateBooking,
   getUsers, getProducts, getCountries, getPayments, addPayment, deletePayment,
@@ -52,10 +58,13 @@ function isUnpaidSoon(b: Booking): boolean {
 }
 
 export default function BookingPage() {
+  const canEdit = useCanEdit()
   const [bookings, setBookings] = useState<Booking[]>([])
   const [summary, setSummary] = useState<BookingSummary | null>(null)
   const [page, setPage] = useState(1)
   const [filters, setFilters] = useState({ sales_id: '', status: '', product_id: '' })
+  const [period, setPeriod] = useState<Period>('30d')
+  const [customRange, setCustomRange] = useState({ date_from: fmtISODate(new Date()), date_to: fmtISODate(new Date()) })
   const [showAdd, setShowAdd] = useState(false)
   const [showDetail, setShowDetail] = useState<Booking | null>(null)
 
@@ -64,9 +73,10 @@ export default function BookingPage() {
   const [countries, setCountries] = useState<Country[]>([])
 
   const [form, setForm] = useState({
-    customer_name: '', phone: '', sales_id: '', product_id: '', country_id: '',
+    customer_name: '', phone: '', sales_id: '', product_id: '',
     departure_date: '', pax: '1', price_per_pax: '', booking_status: 'Waiting Payment 1', notes: ''
   })
+  const [formCountryIds, setFormCountryIds] = useState<number[]>([])
 
   // Payment modal
   const [showPayments, setShowPayments] = useState<Booking | null>(null)
@@ -76,10 +86,11 @@ export default function BookingPage() {
   const loadData = useCallback(async () => {
     const params: Record<string, string> = {}
     Object.entries(filters).forEach(([k, v]) => { if (v) params[k] = v })
+    Object.assign(params, getDateRange(period, customRange))
     const [b, s] = await Promise.all([getBookings(params), getBookingSummary(params)])
     setBookings(b.data)
     setSummary(s.data)
-  }, [filters])
+  }, [filters, period, customRange])
 
   useEffect(() => {
     Promise.all([getUsers(), getProducts(), getCountries()]).then(([u, p, c]) => {
@@ -96,12 +107,13 @@ export default function BookingPage() {
     await createBooking({
       ...form,
       product_id: Number(form.product_id),
-      country_id: form.country_id ? Number(form.country_id) : undefined,
+      country_ids: formCountryIds,
       pax: Number(form.pax),
-      price_per_pax: Number(form.price_per_pax) * 1_000_000,
+      price_per_pax: parseThousands(form.price_per_pax),
     })
     setShowAdd(false)
-    setForm({ customer_name:'', phone:'', sales_id:'', product_id:'', country_id:'', departure_date:'', pax:'1', price_per_pax:'', booking_status:'Waiting Payment 1', notes:'' })
+    setForm({ customer_name:'', phone:'', sales_id:'', product_id:'', departure_date:'', pax:'1', price_per_pax:'', booking_status:'Waiting Payment 1', notes:'' })
+    setFormCountryIds([])
     loadData()
   }
 
@@ -112,6 +124,17 @@ export default function BookingPage() {
 
   const handleFieldUpdate = async (id: string, field: string, value: string | number | null) => {
     await updateBooking(id, { [field]: value })
+    loadData()
+  }
+
+  const handleCountriesUpdate = async (id: string, ids: number[]) => {
+    await updateBooking(id, { country_ids: ids })
+    loadData()
+  }
+
+  const handleTotalUpdate = async (b: Booking, newTotal: number) => {
+    const pricePerPax = b.pax > 0 ? newTotal / b.pax : newTotal
+    await updateBooking(b.id, { price_per_pax: pricePerPax })
     loadData()
   }
 
@@ -169,6 +192,11 @@ export default function BookingPage() {
         ))}
       </div>
 
+      {/* Period filter */}
+      <div className="mb-4">
+        <PeriodFilter period={period} onChange={(p) => { setPeriod(p); setPage(1) }} custom={customRange} onCustomChange={(v) => { setCustomRange(v); setPage(1) }} />
+      </div>
+
       {/* Filters */}
       <div className="bg-white border border-gray-100 rounded-2xl p-3 mb-4 flex flex-wrap gap-2 items-center shadow-sm">
         <select className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-400" value={filters.sales_id} onChange={(e) => { setFilters({ ...filters, sales_id: e.target.value }); setPage(1) }}>
@@ -186,9 +214,11 @@ export default function BookingPage() {
         <button onClick={() => { setFilters({ sales_id:'', status:'', product_id:'' }); setPage(1) }} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-100 ml-auto">
           <RotateCcw className="w-3.5 h-3.5" /> Reset
         </button>
-        <button onClick={() => setShowAdd(true)} className="flex items-center gap-1 bg-blue-600 text-white text-sm px-4 py-1.5 rounded-lg hover:bg-blue-700 font-medium">
-          <Plus className="w-4 h-4" /> Tambah Booking
-        </button>
+        {canEdit && (
+          <button onClick={() => setShowAdd(true)} className="flex items-center gap-1 bg-blue-600 text-white text-sm px-4 py-1.5 rounded-lg hover:bg-blue-700 font-medium">
+            <Plus className="w-4 h-4" /> Tambah Booking
+          </button>
+        )}
       </div>
 
       {/* Table */}
@@ -226,29 +256,79 @@ export default function BookingPage() {
                 return (
                 <tr key={b.id} className="hover:bg-gray-50/50 transition-colors">
                   <td className="px-3 py-3 text-center">
-                    {b.sales ? <Avatar name={b.sales.full_name} src={b.sales.avatar} /> : '-'}
+                    <EditableCell
+                      value={String(b.sales_id ?? '')}
+                      type="select"
+                      options={users.filter(u=>u.role==='sales').map((u) => ({ id: u.id, label: u.full_name }))}
+                      onSave={(v) => handleFieldUpdate(b.id, 'sales_id', v)}
+                      renderValue={() => b.sales ? <Avatar name={b.sales.full_name} src={b.sales.avatar} /> : <span className="text-gray-300">-</span>}
+                      disabled={!canEdit}
+                    />
                   </td>
                   <td className="px-3 py-3">
                     <span className="font-semibold text-blue-600">{b.booking_no}</span>
                   </td>
                   <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{fmtDate(b.lead?.date_received)}</td>
-                  <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{fmtDate(b.booking_date)}</td>
-                  <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{duration !== null ? `${duration} hari` : '-'}</td>
-                  <td className="px-3 py-3 font-semibold text-gray-900">{b.customer?.full_name ?? '-'}</td>
-                  <td className="px-3 py-3 text-gray-600">{b.customer?.phone ?? '-'}</td>
-                  <td className="px-3 py-3 text-gray-700">{b.product?.product_name ?? '-'}</td>
-                  <td className="px-3 py-3">
+                  <td className="px-3 py-3 text-gray-600 whitespace-nowrap">
                     <EditableCell
-                      value={String(b.country_id ?? '')}
-                      type="select"
-                      options={countries.map((c) => ({ id: c.id, label: `${c.flag_url} ${c.name}` }))}
-                      onSave={(v) => handleFieldUpdate(b.id, 'country_id', v ? Number(v) : null)}
-                      renderValue={() => b.country ? <span>{b.country.flag_url} {b.country.name}</span> : <span className="text-gray-300">-</span>}
+                      value={b.booking_date ? b.booking_date.slice(0, 10) : ''}
+                      type="date"
+                      onSave={(v) => handleFieldUpdate(b.id, 'booking_date', v || null)}
+                      disabled={!canEdit}
                     />
                   </td>
-                  <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{fmtDate(b.departure_date)}</td>
-                  <td className="px-3 py-3 text-right text-gray-700">{b.pax}</td>
-                  <td className="px-3 py-3 text-right font-medium text-gray-800">{fmtRp(b.total_price)}</td>
+                  <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{duration !== null ? `${duration} hari` : '-'}</td>
+                  <td className="px-3 py-3 font-semibold text-gray-900">
+                    <EditableCell
+                      value={b.customer?.full_name ?? ''}
+                      onSave={(v) => handleFieldUpdate(b.id, 'customer_name', v)}
+                      disabled={!canEdit}
+                    />
+                  </td>
+                  <td className="px-3 py-3 text-gray-600">
+                    <EditableCell
+                      value={b.customer?.phone ?? ''}
+                      onSave={(v) => handleFieldUpdate(b.id, 'phone', v)}
+                      disabled={!canEdit}
+                    />
+                  </td>
+                  <td className="px-3 py-3 text-gray-700">
+                    <EditableCell
+                      value={String(b.product_id ?? '')}
+                      type="select"
+                      options={products.map((p) => ({ id: p.id, label: p.product_name }))}
+                      onSave={(v) => handleFieldUpdate(b.id, 'product_id', v ? Number(v) : null)}
+                      renderValue={() => b.product?.product_name ?? <span className="text-gray-300">-</span>}
+                      disabled={!canEdit}
+                    />
+                  </td>
+                  <td className="px-3 py-3">
+                    <CountryEditCell
+                      countries={countries}
+                      selected={b.countries ?? []}
+                      onSave={(ids) => handleCountriesUpdate(b.id, ids)}
+                      disabled={!canEdit}
+                    />
+                  </td>
+                  <td className="px-3 py-3 text-gray-600 whitespace-nowrap">
+                    <EditableCell
+                      value={b.departure_date ? b.departure_date.slice(0, 10) : ''}
+                      type="date"
+                      onSave={(v) => handleFieldUpdate(b.id, 'departure_date', v || null)}
+                      disabled={!canEdit}
+                    />
+                  </td>
+                  <td className="px-3 py-3 text-right text-gray-700">
+                    <EditableCell
+                      value={String(b.pax ?? '')}
+                      type="number"
+                      onSave={(v) => handleFieldUpdate(b.id, 'pax', v ? Number(v) : null)}
+                      disabled={!canEdit}
+                    />
+                  </td>
+                  <td className="px-3 py-3 text-right font-medium text-gray-800">
+                    <HargaCell value={b.total_price} onSave={(n) => handleTotalUpdate(b, n)} disabled={!canEdit} />
+                  </td>
                   <td className="px-3 py-3 text-center">
                     <button title="Pembayaran" onClick={() => openPayments(b)} className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition">
                       <Wallet className="w-4 h-4" />
@@ -263,13 +343,14 @@ export default function BookingPage() {
                     <select
                       value={b.booking_status}
                       onChange={(e) => handleStatusChange(b.id, e.target.value)}
-                      className="text-xs border-0 bg-transparent focus:outline-none cursor-pointer font-medium"
+                      disabled={!canEdit}
+                      className="text-xs border-0 bg-transparent focus:outline-none cursor-pointer disabled:cursor-default font-medium"
                     >
                       {BOOKING_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                   </td>
                   <td className="px-3 py-3 max-w-40">
-                    <EditableCell value={b.notes ?? ''} onSave={(v) => handleFieldUpdate(b.id, 'notes', v)} />
+                    <EditableCell value={b.notes ?? ''} onSave={(v) => handleFieldUpdate(b.id, 'notes', v)} disabled={!canEdit} />
                   </td>
                   <td className="px-3 py-3 text-center">
                     <button onClick={() => setShowDetail(b)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition">
@@ -314,10 +395,8 @@ export default function BookingPage() {
             { label: 'No. HP *', key: 'phone', type: 'text', placeholder: '0812-3456-7890' },
             { label: 'Sales', key: 'sales_id', type: 'select', options: users.filter(u=>u.role==='sales').map(u=>({id:u.id,name:u.full_name})) },
             { label: 'Produk *', key: 'product_id', type: 'select', options: products.map(p=>({id:p.id,name:p.product_name})) },
-            { label: 'Negara (opsional)', key: 'country_id', type: 'select', options: countries.map(c=>({id:c.id,name:`${c.flag_url} ${c.name}`})) },
             { label: 'Tanggal Keberangkatan *', key: 'departure_date', type: 'date' },
             { label: 'Jumlah Pax *', key: 'pax', type: 'number', placeholder: '1' },
-            { label: 'Harga per Pax (jt) *', key: 'price_per_pax', type: 'number', placeholder: '14.9' },
             { label: 'Status Awal', key: 'booking_status', type: 'select', options: BOOKING_STATUSES.map(s=>({id:s,name:s})) },
           ].map(({ label, key, type, options, placeholder }) => (
             <div key={key}>
@@ -336,6 +415,16 @@ export default function BookingPage() {
               )}
             </div>
           ))}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Harga per Pax *</label>
+            <input placeholder="14.900.000" className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+              value={form.price_per_pax}
+              onChange={(e) => setForm({ ...form, price_per_pax: formatThousands(e.target.value) })} />
+          </div>
+          <div className="col-span-2">
+            <label className="block text-xs font-medium text-gray-600 mb-1">Negara (opsional, bisa pilih lebih dari satu)</label>
+            <CountryMultiSelect countries={countries} selected={formCountryIds} onChange={setFormCountryIds} />
+          </div>
           <div className="col-span-2">
             <label className="block text-xs font-medium text-gray-600 mb-1">Catatan</label>
             <textarea className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-400 resize-none" rows={2}
@@ -345,7 +434,7 @@ export default function BookingPage() {
             <div className="col-span-2 bg-blue-50 rounded-xl p-3">
               <p className="text-xs text-gray-500">Total Harga</p>
               <p className="text-lg font-bold text-blue-700">
-                Rp {(Number(form.price_per_pax) * Number(form.pax) * 1_000_000).toLocaleString('id-ID')}
+                Rp {(parseThousands(form.price_per_pax) * Number(form.pax)).toLocaleString('id-ID')}
               </p>
             </div>
           )}
@@ -369,9 +458,11 @@ export default function BookingPage() {
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-semibold text-gray-800">{fmtRp(p.amount)}</span>
-                    <button onClick={() => handleDeletePayment(p.id)} className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {canEdit && (
+                      <button onClick={() => handleDeletePayment(p.id)} className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -391,35 +482,39 @@ export default function BookingPage() {
               </div>
             </div>
 
-            <h4 className="text-sm font-semibold text-gray-700 mb-2">Tambah Pembayaran</h4>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Harga</label>
-                <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
-                  placeholder="1.000.000"
-                  value={paymentForm.amount}
-                  onChange={(e) => setPaymentForm({ ...paymentForm, amount: formatThousands(e.target.value) })} />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Catatan</label>
-                <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
-                  value={paymentForm.label}
-                  onChange={(e) => setPaymentForm({ ...paymentForm, label: e.target.value })}>
-                  {PAYMENT_LABELS.map((l) => <option key={l} value={l}>{l}</option>)}
-                </select>
-              </div>
-              {paymentForm.label === 'Custom' && (
-                <div className="col-span-2">
-                  <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
-                    placeholder="Catatan custom..."
-                    value={paymentForm.customLabel}
-                    onChange={(e) => setPaymentForm({ ...paymentForm, customLabel: e.target.value })} />
+            {canEdit && (
+              <>
+                <h4 className="text-sm font-semibold text-gray-700 mb-2">Tambah Pembayaran</h4>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Harga</label>
+                    <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+                      placeholder="1.000.000"
+                      value={paymentForm.amount}
+                      onChange={(e) => setPaymentForm({ ...paymentForm, amount: formatThousands(e.target.value) })} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Catatan</label>
+                    <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+                      value={paymentForm.label}
+                      onChange={(e) => setPaymentForm({ ...paymentForm, label: e.target.value })}>
+                      {PAYMENT_LABELS.map((l) => <option key={l} value={l}>{l}</option>)}
+                    </select>
+                  </div>
+                  {paymentForm.label === 'Custom' && (
+                    <div className="col-span-2">
+                      <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+                        placeholder="Catatan custom..."
+                        value={paymentForm.customLabel}
+                        onChange={(e) => setPaymentForm({ ...paymentForm, customLabel: e.target.value })} />
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-            <button onClick={handleAddPayment} className="w-full mt-4 py-2.5 bg-blue-600 text-white text-sm rounded-xl hover:bg-blue-700 font-medium">
-              Tambah Pembayaran
-            </button>
+                <button onClick={handleAddPayment} className="w-full mt-4 py-2.5 bg-blue-600 text-white text-sm rounded-xl hover:bg-blue-700 font-medium">
+                  Tambah Pembayaran
+                </button>
+              </>
+            )}
           </div>
         )}
       </Modal>
@@ -448,7 +543,7 @@ export default function BookingPage() {
                 ['Customer', showDetail.customer?.full_name ?? '-'],
                 ['No. HP', showDetail.customer?.phone ?? '-'],
                 ['Produk', showDetail.product?.product_name ?? '-'],
-                ['Negara', showDetail.country?.name ?? showDetail.product?.country?.name ?? '-'],
+                ['Negara', showDetail.countries?.map(c=>c.name).join(', ') || showDetail.product?.countries?.map(c=>c.name).join(', ') || '-'],
                 ['Tgl Lead Prospect', fmtDate(showDetail.lead?.date_received)],
                 ['Keberangkatan', fmtDate(showDetail.departure_date)],
                 ['Pax', String(showDetail.pax)],

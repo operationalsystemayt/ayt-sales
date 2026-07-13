@@ -56,6 +56,24 @@ func RequireRole(role string) gin.HandlerFunc {
 	}
 }
 
+// RequireNotViewer blocks the read-only "viewer" role from mutating routes (POST/PUT/
+// PATCH/DELETE). Viewers can hit every GET endpoint but nothing that writes. Meant to be
+// applied once at the top of the authenticated route group so every route is covered
+// without having to annotate each one individually.
+func RequireNotViewer() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Method == http.MethodGet {
+			c.Next()
+			return
+		}
+		if r, _ := c.Get("role"); r == "viewer" {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Akun viewer tidak dapat mengubah data"})
+			return
+		}
+		c.Next()
+	}
+}
+
 func WebhookSecret(secret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if got := c.GetHeader("X-Webhook-Secret"); got == "" || got != secret {

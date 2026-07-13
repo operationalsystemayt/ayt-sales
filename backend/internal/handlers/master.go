@@ -90,7 +90,7 @@ func DeleteProductGroup(c *gin.Context) {
 
 func GetProducts(c *gin.Context) {
 	var data []models.Product
-	q := database.DB.Preload("Country").Order("product_name")
+	q := database.DB.Preload("Countries").Order("product_name")
 	if c.Query("all") != "1" {
 		q = q.Where("is_active = true")
 	}
@@ -98,17 +98,43 @@ func GetProducts(c *gin.Context) {
 	c.JSON(http.StatusOK, data)
 }
 
+type ProductRequest struct {
+	ProductName  string  `json:"product_name"`
+	TripType     string  `json:"trip_type"`
+	DurationDays int     `json:"duration_days"`
+	PricePerPax  float64 `json:"price_per_pax"`
+	Description  string  `json:"description"`
+	IsActive     *bool   `json:"is_active"`
+	CountryIDs   []uint  `json:"country_ids"`
+}
+
 func CreateProduct(c *gin.Context) {
-	var product models.Product
-	if err := c.ShouldBindJSON(&product); err != nil {
+	var req ProductRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+	product := models.Product{
+		ProductName:  req.ProductName,
+		TripType:     req.TripType,
+		DurationDays: req.DurationDays,
+		PricePerPax:  req.PricePerPax,
+		Description:  req.Description,
+		IsActive:     true,
+	}
+	if req.IsActive != nil {
+		product.IsActive = *req.IsActive
 	}
 	if err := database.DB.Create(&product).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	database.DB.Preload("Country").First(&product, product.ID)
+	if len(req.CountryIDs) > 0 {
+		var countries []models.Country
+		database.DB.Where("id IN ?", req.CountryIDs).Find(&countries)
+		database.DB.Model(&product).Association("Countries").Replace(countries)
+	}
+	database.DB.Preload("Countries").First(&product, product.ID)
 	c.JSON(http.StatusCreated, product)
 }
 
@@ -119,12 +145,42 @@ func UpdateProduct(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Produk tidak ditemukan"})
 		return
 	}
-	if err := c.ShouldBindJSON(&product); err != nil {
+	var req ProductRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	database.DB.Save(&product)
-	database.DB.Preload("Country").First(&product, product.ID)
+
+	updates := map[string]interface{}{}
+	if req.ProductName != "" {
+		updates["product_name"] = req.ProductName
+	}
+	if req.TripType != "" {
+		updates["trip_type"] = req.TripType
+	}
+	if req.DurationDays != 0 {
+		updates["duration_days"] = req.DurationDays
+	}
+	if req.PricePerPax != 0 {
+		updates["price_per_pax"] = req.PricePerPax
+	}
+	if req.Description != "" {
+		updates["description"] = req.Description
+	}
+	if req.IsActive != nil {
+		updates["is_active"] = *req.IsActive
+	}
+	if len(updates) > 0 {
+		database.DB.Model(&product).Updates(updates)
+	}
+	if req.CountryIDs != nil {
+		var countries []models.Country
+		if len(req.CountryIDs) > 0 {
+			database.DB.Where("id IN ?", req.CountryIDs).Find(&countries)
+		}
+		database.DB.Model(&product).Association("Countries").Replace(countries)
+	}
+	database.DB.Preload("Countries").First(&product, product.ID)
 	c.JSON(http.StatusOK, product)
 }
 

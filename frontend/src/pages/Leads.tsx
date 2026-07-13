@@ -1,22 +1,26 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, RotateCcw, Trash2, Eye, ChevronLeft, ChevronRight, MessageCircle } from 'lucide-react'
+import { Plus, RotateCcw, Trash2, Eye, ChevronLeft, ChevronRight, MessageCircle, Search } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
 import Modal from '../components/ui/Modal'
 import Badge from '../components/ui/Badge'
 import Avatar from '../components/ui/Avatar'
 import EditableCell from '../components/ui/EditableCell'
 import HargaCell from '../components/ui/HargaCell'
-import { formatThousands, parseThousands } from '../utils/currency'
+import PeriodFilter from '../components/ui/PeriodFilter'
+import { formatThousands, parseThousands, formatHarga } from '../utils/currency'
 import { BOOKING_STATUSES } from '../constants/bookingStatus'
+import { getDateRange, fmtISODate, type Period } from '../utils/dateRange'
+import { useCanEdit } from '../hooks/useCanEdit'
 import {
-  getLeads, createLead, updateLead, deleteLead, bulkUpdateLeads,
+  getLeads, getLeadsSummary, createLead, updateLead, deleteLead, bulkUpdateLeads,
   convertLeadToBooking, getUsers, getMasterSources, getMasterInputs,
-  getMasterQualities, getMasterStatuses, getMasterResults, getProducts, getProductGroups
+  getMasterQualities, getMasterStatuses, getMasterResults, getProducts, getProductGroups,
+  updateCustomer,
 } from '../services/api'
 import type {
   Lead, User, MasterSource, MasterInput, MasterQuality,
-  MasterStatus, MasterResult, Product, ProductGroup
+  MasterStatus, MasterResult, Product, ProductGroup, LeadsSummary
 } from '../types'
 import { format } from 'date-fns'
 
@@ -33,9 +37,13 @@ const PAGE_SIZE = 20
 
 export default function Leads() {
   const navigate = useNavigate()
+  const canEdit = useCanEdit()
   const [leads, setLeads] = useState<Lead[]>([])
+  const [summary, setSummary] = useState<LeadsSummary | null>(null)
   const [page, setPage] = useState(1)
-  const [filters, setFilters] = useState({ sales_id: '', status_id: '', quality_id: '', result_id: '', product_id: '' })
+  const [filters, setFilters] = useState({ sales_id: '', status_id: '', quality_id: '', result_id: '', product_id: '', search: '' })
+  const [period, setPeriod] = useState<Period>('30d')
+  const [customRange, setCustomRange] = useState({ date_from: fmtISODate(new Date()), date_to: fmtISODate(new Date()) })
   const [selected, setSelected] = useState<string[]>([])
   const [showAdd, setShowAdd] = useState(false)
   const [showConvert, setShowConvert] = useState<Lead | null>(null)
@@ -83,13 +91,20 @@ export default function Leads() {
     setStatuses(st.data); setResults(r.data); setProducts(p.data); setGroups(g.data)
   }, [])
 
-  const loadLeads = useCallback(async () => {
+  const buildParams = useCallback(() => {
     const params: Record<string, string> = {}
     Object.entries(filters).forEach(([k, v]) => { if (v) params[k] = v })
-    const res = await getLeads(params)
-    setLeads(res.data)
+    Object.assign(params, getDateRange(period, customRange))
+    return params
+  }, [filters, period, customRange])
+
+  const loadLeads = useCallback(async () => {
+    const params = buildParams()
+    const [leadsRes, summaryRes] = await Promise.all([getLeads(params), getLeadsSummary(params)])
+    setLeads(leadsRes.data)
+    setSummary(summaryRes.data)
     setSelected([])
-  }, [filters])
+  }, [buildParams])
 
   useEffect(() => { loadMasters() }, [loadMasters])
   useEffect(() => { loadLeads() }, [loadLeads])
@@ -159,7 +174,7 @@ export default function Leads() {
       result_id: form.result_id ? Number(form.result_id) : undefined,
       product_id: form.product_id ? Number(form.product_id) : undefined,
       group_id: form.group_id ? Number(form.group_id) : undefined,
-      price: form.price ? Number(form.price) * 1_000_000 : undefined,
+      price: form.price ? parseThousands(form.price) : undefined,
       pax: form.pax ? Number(form.pax) : undefined,
     })
     setShowAdd(false)
@@ -175,7 +190,7 @@ export default function Leads() {
         product_id: convertForm.product_id ? Number(convertForm.product_id) : undefined,
         group_id: convertForm.group_id ? Number(convertForm.group_id) : undefined,
         departure_date: convertForm.departure_date,
-        price_per_pax: convertForm.price_per_pax ? Number(convertForm.price_per_pax) * 1_000_000 : undefined,
+        price_per_pax: convertForm.price_per_pax ? parseThousands(convertForm.price_per_pax) : undefined,
         pax: convertForm.pax ? Number(convertForm.pax) : undefined,
         booking_status: convertForm.booking_status,
         deal_date: convertForm.deal_date || undefined,
@@ -214,10 +229,42 @@ export default function Leads() {
     }
   }
 
+  const summaryCards = summary ? [
+    { label: 'Total Leads', count: summary.total_leads, pct: null, color: 'text-blue-600 bg-blue-50' },
+    { label: 'Convert', count: summary.convert.count, pct: summary.convert.pct, color: 'text-green-600 bg-green-50' },
+    { label: 'Cancel', count: summary.cancel.count, pct: summary.cancel.pct, color: 'text-red-600 bg-red-50' },
+    { label: 'Need Response', count: summary.need_response.count, pct: summary.need_response.pct, color: 'text-orange-600 bg-orange-50' },
+    { label: 'Waiting Customer', count: summary.waiting_customer.count, pct: summary.waiting_customer.pct, color: 'text-yellow-600 bg-yellow-50' },
+    { label: 'Dormant', count: summary.dormant.count, pct: summary.dormant.pct, color: 'text-gray-600 bg-gray-100' },
+  ] : []
+
   return (
     <Layout title="Leads & Prospects">
+      {/* Period filter */}
+      <div className="mb-4">
+        <PeriodFilter period={period} onChange={(p) => { setPeriod(p); setPage(1) }} custom={customRange} onCustomChange={(v) => { setCustomRange(v); setPage(1) }} />
+      </div>
+
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-4">
+        {summaryCards.map(({ label, count, pct, color }) => (
+          <div key={label} className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
+            <div className={`inline-flex text-xs font-medium px-2 py-0.5 rounded-full mb-2 ${color}`}>{label}</div>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-lg font-bold text-gray-900">{count}</span>
+              {pct !== null && <span className="text-xs text-gray-400">({pct.toFixed(1)}%)</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+
       {/* Filters */}
       <div className="bg-white border border-gray-100 rounded-2xl p-3 mb-4 flex flex-wrap gap-2 items-center shadow-sm">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+          <input value={filters.search} onChange={(e) => { setFilters({ ...filters, search: e.target.value }); setPage(1) }} placeholder="Cari nama / no. HP..."
+            className="pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400 w-48" />
+        </div>
         <select className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-400" value={filters.sales_id} onChange={(e) => { setFilters({ ...filters, sales_id: e.target.value }); setPage(1) }}>
           <option value="">Sales: Semua</option>
           {users.filter((u) => u.role === 'sales').map((u) => <option key={u.id} value={u.id}>{u.full_name}</option>)}
@@ -238,12 +285,14 @@ export default function Leads() {
           <option value="">Produk: Semua</option>
           {products.map((p) => <option key={p.id} value={p.id}>{p.product_name}</option>)}
         </select>
-        <button onClick={() => { setFilters({ sales_id:'', status_id:'', quality_id:'', result_id:'', product_id:'' }); setPage(1) }} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-100 ml-auto">
+        <button onClick={() => { setFilters({ sales_id:'', status_id:'', quality_id:'', result_id:'', product_id:'', search:'' }); setPage(1) }} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-100 ml-auto">
           <RotateCcw className="w-3.5 h-3.5" /> Reset
         </button>
-        <button onClick={() => setShowAdd(true)} className="flex items-center gap-1 bg-blue-600 text-white text-sm px-4 py-1.5 rounded-lg hover:bg-blue-700 font-medium">
-          <Plus className="w-4 h-4" /> Tambah Data
-        </button>
+        {canEdit && (
+          <button onClick={() => setShowAdd(true)} className="flex items-center gap-1 bg-blue-600 text-white text-sm px-4 py-1.5 rounded-lg hover:bg-blue-700 font-medium">
+            <Plus className="w-4 h-4" /> Tambah Data
+          </button>
+        )}
       </div>
 
       {/* Table */}
@@ -287,10 +336,16 @@ export default function Leads() {
                   </td>
                   <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{fmtDate(lead.date_received)}</td>
                   <td className="px-3 py-3 font-medium text-gray-700">{lead.customer?.phone ?? '-'}</td>
-                  <td className="px-3 py-3 font-semibold text-gray-900">{lead.customer?.full_name ?? '-'}</td>
+                  <td className="px-3 py-3 font-semibold text-gray-900">
+                    <EditableCell
+                      value={lead.customer?.full_name ?? ''}
+                      onSave={(v) => updateCustomer(lead.customer_id, { full_name: v }).then(loadLeads)}
+                      disabled={!canEdit}
+                    />
+                  </td>
                   {/* Inline dropdowns */}
                   <td className="px-3 py-3">
-                    <select className="text-xs border-0 bg-transparent focus:outline-none text-gray-600 cursor-pointer"
+                    <select disabled={!canEdit} className="text-xs border-0 bg-transparent focus:outline-none text-gray-600 cursor-pointer disabled:cursor-default"
                       value={lead.source_id ?? ''}
                       onChange={(e) => handleInlineUpdate(lead.id, 'source_id', e.target.value ? Number(e.target.value) : null)}>
                       <option value="">-</option>
@@ -307,6 +362,7 @@ export default function Leads() {
                       options={qualities.map((q) => ({ id: q.id, label: q.name }))}
                       onSave={(v) => v && handleQualityChange(lead, Number(v))}
                       renderValue={() => lead.quality ? <Badge label={lead.quality.name} type="quality" /> : <span className="text-gray-300">-</span>}
+                      disabled={!canEdit}
                     />
                   </td>
                   <td className="px-3 py-3">
@@ -317,14 +373,14 @@ export default function Leads() {
                           Terakhir chat: {fmtDateTime(lead.last_chat_at)}
                         </span>
                       )}
-                      <button title="Buka Chat" onClick={() => navigate(`/leads/${lead.id}/chat`)}
+                      <button title="Buka Chat" onClick={() => navigate(`/chat?lead=${lead.id}`)}
                         className="p-0.5 rounded hover:bg-gray-100 text-gray-400 hover:text-blue-600">
                         <MessageCircle className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </td>
                   <td className="px-3 py-3">
-                    <select className="text-xs border-0 bg-transparent focus:outline-none cursor-pointer"
+                    <select disabled={!canEdit} className="text-xs border-0 bg-transparent focus:outline-none cursor-pointer disabled:cursor-default"
                       value={lead.result_id ?? ''}
                       onChange={(e) => handleInlineUpdate(lead.id, 'result_id', e.target.value ? Number(e.target.value) : null)}>
                       <option value="">-</option>
@@ -339,14 +395,15 @@ export default function Leads() {
                       value={lead.deal_date ? lead.deal_date.slice(0, 10) : ''}
                       type="date"
                       onSave={(v) => handleInlineUpdate(lead.id, 'deal_date', v || null)}
+                      disabled={!canEdit}
                     />
                   </td>
                   <td className="px-3 py-3">
-                    <select className="text-xs border-0 bg-transparent focus:outline-none text-gray-600 cursor-pointer max-w-24"
+                    <select disabled={!canEdit} className="text-xs border-0 bg-transparent focus:outline-none text-gray-600 cursor-pointer disabled:cursor-default max-w-24"
                       value={lead.product_id ?? ''}
                       onChange={(e) => handleInlineUpdate(lead.id, 'product_id', e.target.value ? Number(e.target.value) : null)}>
                       <option value="">-</option>
-                      {products.map((p) => <option key={p.id} value={p.id}>{p.country?.name ?? p.product_name}</option>)}
+                      {products.map((p) => <option key={p.id} value={p.id}>{p.countries?.map(c=>c.name).join(', ') || p.product_name}</option>)}
                     </select>
                   </td>
                   <td className="px-3 py-3">
@@ -356,16 +413,18 @@ export default function Leads() {
                       options={groups.map((g) => ({ id: g.id, label: g.name }))}
                       onSave={(v) => handleInlineUpdate(lead.id, 'group_id', v ? Number(v) : null)}
                       renderValue={() => lead.group ? <Badge label={lead.group.name} type="group" /> : <span className="text-gray-300">-</span>}
+                      disabled={!canEdit}
                     />
                   </td>
                   <td className="px-3 py-3 text-right text-gray-700">
-                    <HargaCell value={lead.price} onSave={(n) => handleInlineUpdate(lead.id, 'price', n)} />
+                    <HargaCell value={lead.price} onSave={(n) => handleInlineUpdate(lead.id, 'price', n)} disabled={!canEdit} />
                   </td>
                   <td className="px-3 py-3 text-right text-gray-700">
                     <EditableCell
                       value={String(lead.pax ?? '')}
                       type="number"
                       onSave={(v) => handleInlineUpdate(lead.id, 'pax', v ? Number(v) : null)}
+                      disabled={!canEdit}
                     />
                   </td>
                   <td className="px-3 py-3 text-right font-medium text-gray-800">{fmtNum(lead.total_price)}</td>
@@ -373,19 +432,22 @@ export default function Leads() {
                     <EditableCell
                       value={lead.notes ?? ''}
                       onSave={(v) => handleInlineUpdate(lead.id, 'notes', v)}
+                      disabled={!canEdit}
                     />
                   </td>
                   <td className="px-3 py-3">
-                    <div className="flex items-center justify-center gap-1">
-                      <button title="Convert ke Booking" onClick={() => { setShowConvert(lead); setConvertResult(null); setConvertError(''); setConvertForm({ product_id: String(lead.product_id ?? ''), group_id: String(lead.group_id ?? ''), departure_date: '', price_per_pax: lead.price ? String(lead.price / 1_000_000) : '', pax: String(lead.pax ?? 1), booking_status: 'Waiting Payment 1', deal_date: lead.deal_date ? lead.deal_date.slice(0, 10) : '' }) }}
-                        className="p-1 rounded-lg hover:bg-yellow-100 text-yellow-600 transition">
-                        <Eye className="w-4 h-4" />
-                      </button>
-                      <button title="Hapus" onClick={() => handleDelete(lead.id)}
-                        className="p-1 rounded-lg hover:bg-red-100 text-red-500 transition">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+                    {canEdit ? (
+                      <div className="flex items-center justify-center gap-1">
+                        <button title="Convert ke Booking" onClick={() => { setShowConvert(lead); setConvertResult(null); setConvertError(''); setConvertForm({ product_id: String(lead.product_id ?? ''), group_id: String(lead.group_id ?? ''), departure_date: '', price_per_pax: lead.price ? formatThousands(String(lead.price)) : '', pax: String(lead.pax ?? 1), booking_status: 'Waiting Payment 1', deal_date: lead.deal_date ? lead.deal_date.slice(0, 10) : '' }) }}
+                          className="p-1 rounded-lg hover:bg-yellow-100 text-yellow-600 transition">
+                          <Eye className="w-4 h-4" />
+                        </button>
+                        <button title="Hapus" onClick={() => handleDelete(lead.id)}
+                          className="p-1 rounded-lg hover:bg-red-100 text-red-500 transition">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : <span className="text-gray-300 text-xs text-center block">-</span>}
                   </td>
                 </tr>
               ))}
@@ -416,7 +478,7 @@ export default function Leads() {
       </div>
 
       {/* Bulk edit bar */}
-      {selected.length > 0 && (
+      {canEdit && selected.length > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-white rounded-2xl shadow-2xl border border-gray-200 px-6 py-4 flex items-center gap-4 z-40 min-w-max">
           <span className="text-sm font-semibold text-gray-800">{selected.length} data dipilih</span>
           <span className="text-sm text-gray-500">Ubah</span>
@@ -452,7 +514,6 @@ export default function Leads() {
             { label: 'Hasil', key: 'result_id', type: 'select', options: results.map(r=>({id:r.id,name:r.name})) },
             { label: 'Produk', key: 'product_id', type: 'select', options: products.map(p=>({id:p.id,name:p.product_name})) },
             { label: 'Grup', key: 'group_id', type: 'select', options: groups.map(g=>({id:g.id,name:g.name})) },
-            { label: 'Harga (jt)', key: 'price', type: 'number', placeholder: 'Contoh: 14.9' },
             { label: 'Jumlah Pax', key: 'pax', type: 'number', placeholder: 'Contoh: 2' },
           ].map(({ label, key, type, options, placeholder }) => (
             <div key={key}>
@@ -472,13 +533,19 @@ export default function Leads() {
             </div>
           ))}
           <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Harga</label>
+            <input placeholder="1.000.000" className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+              value={form.price}
+              onChange={(e) => setForm({ ...form, price: formatThousands(e.target.value) })} />
+          </div>
+          <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Input</label>
             <input disabled value="Manual" className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 text-gray-400" />
           </div>
           <div className="col-span-2">
             <label className="block text-xs font-medium text-gray-600 mb-1">Jumlah Harga</label>
             <input readOnly className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 text-gray-500"
-              value={form.price && form.pax ? `${(Number(form.price) * Number(form.pax)).toFixed(1)} jt` : 'Akan terhitung otomatis'} />
+              value={form.price && form.pax ? formatHarga(parseThousands(form.price) * Number(form.pax)) : 'Akan terhitung otomatis'} />
           </div>
         </div>
         <div className="px-6 pb-6 flex justify-end gap-3">
@@ -573,7 +640,6 @@ export default function Leads() {
                 { label: 'Grup', key: 'group_id', type: 'select', options: groups.map(g=>({id:g.id,name:g.name})) },
                 { label: 'Tgl Deal', key: 'deal_date', type: 'date' },
                 { label: 'Keberangkatan *', key: 'departure_date', type: 'date' },
-                { label: 'Harga per Pax (jt) *', key: 'price_per_pax', type: 'number', placeholder: '14.9' },
                 { label: 'Jumlah Pax *', key: 'pax', type: 'number', placeholder: '2' },
                 { label: 'Status Booking Awal', key: 'booking_status', type: 'select', options: BOOKING_STATUSES.map(s=>({id:s,name:s})) },
               ].map(({ label, key, type, options, placeholder }) => (
@@ -593,12 +659,18 @@ export default function Leads() {
                   )}
                 </div>
               ))}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Harga per Pax *</label>
+                <input placeholder="14.900.000" className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+                  value={convertForm.price_per_pax}
+                  onChange={(e) => setConvertForm({ ...convertForm, price_per_pax: formatThousands(e.target.value) })} />
+              </div>
             </div>
             {convertForm.price_per_pax && convertForm.pax && (
               <div className="mt-4 bg-blue-50 rounded-xl p-4">
                 <p className="text-xs text-gray-500 mb-1">Total Harga</p>
                 <p className="text-xl font-bold text-blue-700">
-                  Rp {(Number(convertForm.price_per_pax) * Number(convertForm.pax) * 1_000_000).toLocaleString('id-ID')}
+                  Rp {(parseThousands(convertForm.price_per_pax) * Number(convertForm.pax)).toLocaleString('id-ID')}
                 </p>
               </div>
             )}

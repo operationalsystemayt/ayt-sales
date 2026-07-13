@@ -3,6 +3,8 @@ import { Plus, Pencil, Trash2, Package, Layers, Check, X } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
 import Modal from '../components/ui/Modal'
 import EditableCell from '../components/ui/EditableCell'
+import CountryMultiSelect from '../components/ui/CountryMultiSelect'
+import { useCanEdit } from '../hooks/useCanEdit'
 import {
   getProducts, createProduct, updateProduct, deleteProduct,
   getProductGroups, createProductGroup, updateProductGroup, deleteProductGroup,
@@ -14,13 +16,15 @@ type Tab = 'products' | 'groups'
 
 // ── Products Tab ──────────────────────────────────────────────────────────────
 function ProductsTab() {
+  const canEdit = useCanEdit()
   const [products, setProducts] = useState<Product[]>([])
   const [countries, setCountries] = useState<Country[]>([])
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState({
-    product_name: '', country_id: '', trip_type: 'Open Trip',
+    product_name: '', trip_type: 'Open Trip',
     duration_days: '', price_per_pax: '', description: '',
   })
+  const [formCountryIds, setFormCountryIds] = useState<number[]>([])
 
   const load = useCallback(async () => {
     const [p, c] = await Promise.all([getProducts(true), getCountries()])
@@ -30,23 +34,21 @@ function ProductsTab() {
 
   useEffect(() => { load() }, [load])
 
-  const countryOptions = countries.map((c) => ({ id: c.id, label: `${c.flag_url} ${c.name}` }))
-
   const handleAdd = async () => {
     await createProduct({
       ...form,
-      country_id: form.country_id ? Number(form.country_id) : null,
+      country_ids: formCountryIds,
       duration_days: Number(form.duration_days),
       price_per_pax: Number(form.price_per_pax) * 1_000_000,
     })
     setShowAdd(false)
-    setForm({ product_name: '', country_id: '', trip_type: 'Open Trip', duration_days: '', price_per_pax: '', description: '' })
+    setForm({ product_name: '', trip_type: 'Open Trip', duration_days: '', price_per_pax: '', description: '' })
+    setFormCountryIds([])
     load()
   }
 
   const handleUpdate = async (id: number, field: string, raw: string) => {
     const val =
-      field === 'country_id' ? (raw ? Number(raw) : null) :
       field === 'duration_days' ? Number(raw) :
       field === 'price_per_pax' ? Number(raw) * 1_000_000 :
       raw
@@ -69,12 +71,14 @@ function ProductsTab() {
           <h2 className="text-base font-semibold text-gray-800">Produk Trip</h2>
           <p className="text-xs text-gray-400 mt-0.5">Klik nilai untuk edit langsung. Hapus akan menonaktifkan produk.</p>
         </div>
-        <button
-          onClick={() => setShowAdd(true)}
-          className="flex items-center gap-1.5 bg-blue-600 text-white text-sm px-4 py-2 rounded-xl hover:bg-blue-700 font-medium"
-        >
-          <Plus className="w-4 h-4" /> Tambah Produk
-        </button>
+        {canEdit && (
+          <button
+            onClick={() => setShowAdd(true)}
+            className="flex items-center gap-1.5 bg-blue-600 text-white text-sm px-4 py-2 rounded-xl hover:bg-blue-700 font-medium"
+          >
+            <Plus className="w-4 h-4" /> Tambah Produk
+          </button>
+        )}
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -94,18 +98,17 @@ function ProductsTab() {
                   <EditableCell
                     value={p.product_name}
                     onSave={(v) => handleUpdate(p.id, 'product_name', v)}
+                    disabled={!canEdit}
                   />
                 </td>
                 <td className="px-4 py-3">
-                  <EditableCell
-                    value={String(p.country_id ?? '')}
-                    type="select"
-                    options={countryOptions}
-                    onSave={(v) => handleUpdate(p.id, 'country_id', v)}
-                  />
-                  {p.country && (
-                    <span className="block text-xs text-gray-400 mt-0.5">{p.country.flag_url} {p.country.name}</span>
-                  )}
+                  {p.countries && p.countries.length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {p.countries.map((c) => (
+                        <span key={c.id} className="text-xs bg-gray-100 rounded-full px-2 py-0.5">{c.flag_url} {c.name}</span>
+                      ))}
+                    </div>
+                  ) : <span className="text-gray-300 text-xs">-</span>}
                 </td>
                 <td className="px-4 py-3">
                   <EditableCell
@@ -113,6 +116,7 @@ function ProductsTab() {
                     type="select"
                     options={[{ id: 'Open Trip', label: 'Open Trip' }, { id: 'Private Trip', label: 'Private Trip' }]}
                     onSave={(v) => handleUpdate(p.id, 'trip_type', v)}
+                    disabled={!canEdit}
                   />
                 </td>
                 <td className="px-4 py-3">
@@ -120,6 +124,7 @@ function ProductsTab() {
                     value={String(p.duration_days ?? '')}
                     type="number"
                     onSave={(v) => handleUpdate(p.id, 'duration_days', v)}
+                    disabled={!canEdit}
                   />
                   {p.duration_days ? <span className="text-gray-400 text-xs"> hari</span> : null}
                 </td>
@@ -128,6 +133,7 @@ function ProductsTab() {
                     value={String(p.price_per_pax ? p.price_per_pax / 1_000_000 : '')}
                     type="number"
                     onSave={(v) => handleUpdate(p.id, 'price_per_pax', v)}
+                    disabled={!canEdit}
                   />
                   {p.price_per_pax ? <span className="text-gray-400 text-xs"> = {fmtPrice(p.price_per_pax)}</span> : null}
                 </td>
@@ -137,13 +143,15 @@ function ProductsTab() {
                   </span>
                 </td>
                 <td className="px-4 py-3">
-                  <button
-                    onClick={() => handleDelete(p.id, p.product_name)}
-                    className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
-                    title="Nonaktifkan"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  {canEdit && (
+                    <button
+                      onClick={() => handleDelete(p.id, p.product_name)}
+                      className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                      title="Nonaktifkan"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -168,18 +176,9 @@ function ProductsTab() {
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Negara</label>
-              <select
-                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
-                value={form.country_id}
-                onChange={(e) => setForm({ ...form, country_id: e.target.value })}
-              >
-                <option value="">Pilih negara</option>
-                {countries.map((c) => (
-                  <option key={c.id} value={c.id}>{c.flag_url} {c.name}</option>
-                ))}
-              </select>
+            <div className="col-span-2">
+              <label className="block text-xs font-medium text-gray-600 mb-1">Negara (bisa pilih lebih dari satu)</label>
+              <CountryMultiSelect countries={countries} selected={formCountryIds} onChange={setFormCountryIds} />
             </div>
 
             <div>
@@ -248,6 +247,7 @@ function ProductsTab() {
 
 // ── Product Groups Tab ────────────────────────────────────────────────────────
 function GroupsTab() {
+  const canEdit = useCanEdit()
   const [groups, setGroups] = useState<ProductGroup[]>([])
   const [showAdd, setShowAdd] = useState(false)
   const [newName, setNewName] = useState('')
@@ -289,12 +289,14 @@ function GroupsTab() {
           <h2 className="text-base font-semibold text-gray-800">Grup Produk</h2>
           <p className="text-xs text-gray-400 mt-0.5">Contoh: Open Trip, Private Trip</p>
         </div>
-        <button
-          onClick={() => setShowAdd(true)}
-          className="flex items-center gap-1.5 bg-blue-600 text-white text-sm px-4 py-2 rounded-xl hover:bg-blue-700 font-medium"
-        >
-          <Plus className="w-4 h-4" /> Tambah Grup
-        </button>
+        {canEdit && (
+          <button
+            onClick={() => setShowAdd(true)}
+            className="flex items-center gap-1.5 bg-blue-600 text-white text-sm px-4 py-2 rounded-xl hover:bg-blue-700 font-medium"
+          >
+            <Plus className="w-4 h-4" /> Tambah Grup
+          </button>
+        )}
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -330,22 +332,24 @@ function GroupsTab() {
                   )}
                 </td>
                 <td className="px-4 py-3">
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => { setEditingId(g.id); setEditName(g.name) }}
-                      className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
-                      title="Edit"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(g.id, g.name)}
-                      className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
-                      title="Hapus"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                  {canEdit && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => { setEditingId(g.id); setEditName(g.name) }}
+                        className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                        title="Edit"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(g.id, g.name)}
+                        className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                        title="Hapus"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}

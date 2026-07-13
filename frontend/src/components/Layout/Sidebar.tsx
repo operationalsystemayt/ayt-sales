@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, Users, BookOpen, Package, TrendingUp, LogOut, Plane, SlidersHorizontal } from 'lucide-react'
+import { LayoutDashboard, Users, BookOpen, Package, TrendingUp, LogOut, Plane, SlidersHorizontal, MessageCircle, Contact } from 'lucide-react'
 import { useAuthStore } from '../../store/auth'
 
 const navItems = [
@@ -7,6 +7,8 @@ const navItems = [
   { to: '/leads', icon: Users, label: 'Leads & Prospects' },
   { to: '/booking', icon: BookOpen, label: 'Booking' },
   { to: '/report', icon: TrendingUp, label: 'Report' },
+  { to: '/chat', icon: MessageCircle, label: 'Chat' },
+  { to: '/contact', icon: Contact, label: 'Contact' },
   { to: '/setup', icon: Package, label: 'Setup' },
   { to: '/settings', icon: SlidersHorizontal, label: 'Pengaturan' },
 ]

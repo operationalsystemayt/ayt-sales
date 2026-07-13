@@ -199,3 +199,267 @@ Keduanya clean. Ringkasan perubahan:
 
   You can reuse this same phone number (6281111222333) for more webhook calls — since the lead is still unconverted, each
   one just appends to the same chat thread and lead instead of creating a duplicate.
+
+
+
+ Good, I have everything needed. Here's the full walkthrough:
+
+  1. Run the backend
+
+⏺ Bash(nc -z -w2 localhost 5432 && echo "postgres: reachable" || echo "postgres: NOT reachable — start it first")
+  ⎿  Connection to localhost port 5432 [tcp/postgresql] succeeded!
+     postgres: reachable
+  ⎿  Allowed by auto mode classifier
+
+⏺ Postgres is already up. To run the backend:
+
+  cd /Users/mac-211449/Documents/ayt-sales/backend
+  go run ./cmd/server
+  Runs on :8080 (from .env). You should see Database connected successfully / Database migrated successfully.
+
+  2. Run the frontend
+
+  cd /Users/mac-211449/Documents/ayt-sales/frontend
+  npm run dev
+  Opens on http://localhost:5173 (Vite proxies /api → localhost:8080). Log in with admin@ayt.com / admin123.
+
+  3. Set up WAHA locally (Docker)
+
+  docker run -it --rm -p 3000:3000 devlikeapro/waha
+  Dashboard: http://localhost:3000/dashboard. For pure local testing (not exposed to the internet) you can skip WAHA's own API key — only add one if you ever expose
+  port 3000 beyond localhost (see the security note from earlier).
+
+  Create + start a session, with the webhook pointed at our backend, in one call:
+  curl -X POST http://localhost:3000/api/sessions -H "Content-Type: application/json" -d '{
+    "name": "default",
+    "config": {
+      "webhooks": [{
+        "url": "http://host.docker.internal:8080/api/webhooks/waha",
+        "events": ["message"],
+        "customHeaders": [{ "name": "X-Webhook-Secret", "value": "dev-webhook-secret-change-me" }]
+      }]
+    }
+  }'
+  host.docker.internal is how the WAHA container reaches your Mac's localhost:8080 — this works out of the box on Docker Desktop for Mac. The secret value matches
+  WEBHOOK_SECRET in backend/.env.
+
+  Scan the QR code to link a real WhatsApp number to this session:
+  open http://localhost:3000/api/default/auth/qr
+  (or use the Dashboard's QR view). Scan it from WhatsApp → Linked Devices on the phone you want connected. Session status flips to WORKING once scanned — check with
+  curl http://localhost:3000/api/sessions/default.
+
+  4. Switch AYT Sales to WAHA
+
+  In the app: Settings → Provider WhatsApp → WAHA → Simpan. (WAHA_BASE_URL=http://localhost:3000 is already the default in .env, since our backend calls WAHA
+  directly — not through Docker networking.)
+
+  5. Receive a webhook (inbound message)
+
+  From a different phone, send a WhatsApp message to the number you linked in step 3. WAHA POSTs it to /api/webhooks/waha, which auto-creates a Lead (Source=Organik,
+  Quality=Warm, Status=Need Response) and a Chat row. Confirm it landed: Leads & Prospects page → the new lead should appear.
+
+  6. Read the message in the Chat tab
+
+  On that lead's row, click the chat-bubble icon in the Status column → opens /leads/:id/chat. Loading this page automatically fires a mark-as-read (WAHA sendSeen),
+  so it'll show as read on the customer's phone. The inbound message shows as a left-aligned gray bubble.
+
+  7. Send a message via the Chat tab
+
+  Type in the input box at the bottom → Kirim (or Enter). This calls POST /leads/:id/chats, which sends through WahaProvider.SendText — sendSeen → simulated typing
+  (~1–4s) → the actual message, hitting the real WAHA session so it's delivered to the linked WhatsApp number. It appears as a blue bubble on the right. If anything
+  fails (e.g. session not WORKING), a red inline warning shows under the composer with the error, and the message stays in the thread either way.
+
+  Sources:
+  - Docker/Compose setup, dashboard, Swagger
+  - Sessions — start, QR code
+  - Webhook config with customHeaders
+
+
+mac-211449@MacBook-Pro ayt-sales % docker run -it --rm -p 3000:3000 devlikeapro/waha
+WARNING: The requested image's platform (linux/amd64) does not match the detected host platform (linux/arm64/v8) and no specific platform was requested
+xvfb-run is working!
+Executing node with xvfb-run...
+[00:48:16.527] INFO (Storage/42): Directory '/tmp/whatsapp-files' created from scratch
+[00:48:13.692] INFO (Bootstrap/42): NODE - Catching unhandled rejections and exceptions enabled
+[00:48:13.693] INFO (Bootstrap/42): WAHA (WhatsApp HTTP API) - Running CORE version...
+[00:48:17.296] INFO (Bootstrap/42): WhatsApp HTTP API is running on: http://[::1]:3000
+[00:48:17.296] INFO (Bootstrap/42): Environment {"version":"2026.4.2","engine":"WEBJS","tier":"CORE","browser":"/usr/bin/chromium","platform":"linux/x64","worker":{"id":null}}
+[00:48:17.292] INFO (NestFactory/42): Starting Nest application...
+[00:48:17.295] INFO (NestApplication/42): Nest application successfully started
+
+⬇️ ⬇️ ⬇️ ⬇️ ⬇️ ⬇️ ⬇️ ⬇️ ⬇️ ⬇️ ⬇️ ⬇️
+Generated credentials (persist to .env or WAHA_* env vars)
+Save these values to your environment (.env or WAHA_*) to reuse them; new keys are generated on every start otherwise.
+
+cat <<'EOF' >> .env
+
+WAHA_API_KEY=7ddb4af8245b44788568e2f97a0a3062
+WAHA_DASHBOARD_USERNAME=admin
+WAHA_DASHBOARD_PASSWORD=708967a3a8974cbfb4d1c87a778b2835
+WHATSAPP_SWAGGER_USERNAME=admin
+WHATSAPP_SWAGGER_PASSWORD=708967a3a8974cbfb4d1c87a778b2835
+EOF
+
+Generated credentials ready to copy
+⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️
+
+  1. On the VPS: run WAHA bound to localhost only
+
+  Don't expose port 3000 to the public internet — that's exactly how the account got banned in the GitHub issue we looked
+  at earlier (open API → spam abuse → ban). Bind it to loopback only:
+
+  docker run -d --name waha --restart always \
+    -p 127.0.0.1:3000:3000 \
+    -e WAHA_API_KEY=<your-key> \
+    -e WHATSAPP_HOOK_URL=http://<ayt-sales-backend-host>:8080/api/webhooks/waha \
+    -e WHATSAPP_HOOK_EVENTS=message \
+    -e WAHA_DASHBOARD_USERNAME=admin \
+    -e WAHA_DASHBOARD_PASSWORD=<pick-something> \
+    devlikeapro/waha
+  127.0.0.1:3000:3000 means WAHA is only reachable from the VPS itself — nothing external can hit it directly.
+
+  If the ayt-sales backend runs on the same VPS: use --add-host=host.docker.internal:host-gateway in the docker run
+  command (Linux needs this explicitly, unlike Docker Desktop on Mac) and point WHATSAPP_HOOK_URL at
+  http://host.docker.internal:8080/.... If it's on a different server, use that server's real address over HTTPS.
+
+  2. Reach WAHA securely via SSH tunnel (no public exposure needed)
+
+  From your local machine:
+  ssh -L 3000:localhost:3000 your-user@your-vps-ip
+  Now http://localhost:3000 on your laptop transparently tunnels to the VPS's WAHA instance. Everything below — dashboard,
+  QR, pairing code — works exactly like the local setup you already have, just through this tunnel.
+
+  3. Create the session (same as before, plus the API key header)
+
+  curl -X POST http://localhost:3000/api/sessions \
+    -H "Content-Type: application/json" \
+    -H "X-Api-Key: <your-key>" \
+    -d '{
+      "name": "default",
+      "config": {
+        "webhooks": [{
+          "url": "http://<ayt-sales-backend-host>:8080/api/webhooks/waha",
+          "events": ["message"],
+          "customHeaders": [{ "name": "X-Webhook-Secret", "value": "<your WEBHOOK_SECRET>" }]
+        }]
+      }
+    }'
+
+ 4. Link the real number — two options
+
+  Option A — QR scan (through the tunnel):
+  curl -H "X-Api-Key: <your-key>" http://localhost:3000/api/default/auth/qr -o qr.png && open qr.png
+  Scan with WhatsApp → Linked Devices on the phone.
+
+  Option B — pairing code (no image needed, easier over SSH/headless):
+  curl -X POST http://localhost:3000/api/default/auth/request-code \
+    -H "Content-Type: application/json" \
+    -H "X-Api-Key: 7ddb4af8245b44788568e2f97a0a3062" \
+    -d '{"phoneNumber": "6282220056883"}'
+  Returns {"code": "ABCD-ABCD"}. On the phone: WhatsApp → Linked Devices → Link a Device → Link with phone number instead,
+  then type in that code. WAHA's own docs say to keep QR as a fallback since pairing codes aren't always available.
+
+  Either way, poll until it's linked:
+  curl -H "X-Api-Key: <your-key>" http://localhost:3000/api/sessions/default
+  status flips to WORKING once linked.
+
+  5. Reproducing this locally
+
+  Steps 3 and 4 are word-for-word identical locally — that's the whole point of the abstraction. The only thing that
+  changes is step 2: locally you already have direct access, so skip the SSH tunnel and just hit http://localhost:3000
+  directly, exactly like your current local setup.
+
+  Sources:
+  - Pairing code linking
+  - Never expose WAHA directly — reverse proxy / bind to localhost
+
+  # 1. Check what sessions currently exist
+  curl -H "X-Api-Key: 7ddb4af8245b44788568e2f97a0a3062" http://localhost:3000/api/sessions
+
+  # 2. Re-create it (safe to re-run even if it half-exists)
+  curl -X POST http://localhost:3000/api/sessions \
+    -H "Content-Type: application/json" \
+    -H "X-Api-Key: 7ddb4af8245b44788568e2f97a0a3062" \
+    -d '{
+      "name": "default",
+      "config": {
+        "webhooks": [{
+          "url": "http://localhost:8080/api/webhooks/waha",
+          "events": ["message"],
+          "customHeaders": [{ "name": "X-Webhook-Secret", "value": "dev-webhook-secret-change-me" }]
+        }]
+      }
+    }'
+
+  # 3. If it comes back STOPPED instead of auto-starting, start it explicitly
+  curl -X POST http://localhost:3000/api/sessions/default/start -H "X-Api-Key: 7ddb4af8245b44788568e2f97a0a3062"
+
+  # 4. Now retry the pairing code
+  curl -X POST http://localhost:3000/api/default/auth/request-code \
+    -H "Content-Type: application/json" -H "X-Api-Key: 7ddb4af8245b44788568e2f97a0a3062" \
+    -d '{"phoneNumber": "6282220056883"}'
+
+  To stop this happening again, mount a volume so sessions survive container recreation — this is the fix that actually
+  matters long-term:
+
+  docker run -d --name waha --restart always \
+    -p 127.0.0.1:3000:3000 \
+    -v $(pwd)/.sessions:/app/.sessions \
+    -e WAHA_API_KEY=<your-key> \
+    -e WHATSAPP_HOOK_URL=http://<ayt-sales-backend-host>:8080/api/webhooks/waha \
+    -e WHATSAPP_HOOK_EVENTS=message \
+    -e WAHA_DASHBOARD_USERNAME=admin \
+    -e WAHA_DASHBOARD_PASSWORD=<pick-something> \
+    devlikeapro/waha
+
+  Two things changed from what I gave you before: -v $(pwd)/.sessions:/app/.sessions (persists the linked session across
+  restarts/recreations) and no --rm / no -it (so it survives your terminal closing and Docker won't delete the container's
+  state on stop — pair with --restart always so it comes back up after a VPS reboot too). Once you're on this setup, you
+  shouldn't need to re-link the phone every time you tweak an env var.
+
+  # 1. Check its current status first
+  curl -H "X-Api-Key: dc9cbf430e624d70a5ddf3e57b5ada76" http://localhost:3000/api/sessions/default
+
+  Look at the "status" field in the response — it'll be one of STOPPED, STARTING, SCAN_QR_CODE, WORKING, or FAILED.
+
+  - If STOPPED → start it:
+  curl -X POST http://localhost:3000/api/sessions/default/start -H "X-Api-Key: dc9cbf430e624d70a5ddf3e57b5ada76"
+  - If you need to update the webhook config (e.g. fix the URL) instead of creating fresh, use PUT:
+  curl -X PUT http://localhost:3000/api/sessions/default \
+    -H "Content-Type: application/json" \
+    -H "X-Api-Key: dc9cbf430e624d70a5ddf3e57b5ada76" \
+    -d '{
+      "config": {
+        "webhooks": [{
+          "url": "http://localhost:8080/api/webhooks/waha"
+        }]}
+    }'
+  - If SCAN_QR_CODE → it's already waiting for you to link a device, skip straight to requesting the pairing code:
+  curl -X POST http://localhost:3000/api/default/auth/request-code \
+    -H "Content-Type: application/json" -H "X-Api-Key: dc9cbf430e624d70a5ddf3e57b5ada76" \
+    -d '{"phoneNumber": "6282220056883"}'
+  - If WORKING → it's already linked, nothing more to do — go check the AYT Sales Leads page for inbound messages instead.
+  - If FAILED → restart it: POST /api/sessions/default/restart, then re-check status.
+
+  Run the status check first and tell me what status it shows if you're still stuck — that tells us exactly which branch
+  applies.
+
+  You dropped the events array (and the customHeaders for the shared secret) when you simplified the body — WAHA requires
+  events to be a non-empty array from its enum list. Restore both:
+
+  curl -X PUT http://localhost:3000/api/sessions/default \
+    -H "Content-Type: application/json" \
+    -H "X-Api-Key: dc9cbf430e624d70a5ddf3e57b5ada76" \
+    -d '{
+      "config": {
+        "webhooks": [{
+          "url": "http://localhost:8080/api/webhooks/waha",
+          "events": ["message"],
+          "customHeaders": [{ "name": "X-Webhook-Secret", "value": "dev-webhook-secret-change-me" }]
+        }]
+      }
+    }'
+
+  Without customHeaders, WAHA's webhook calls to our backend won't carry X-Webhook-Secret, and our /api/webhooks/waha
+  endpoint will reject them with 401 (per middleware.WebhookSecret in backend/internal/router/router.go) — so both fields
+  matter here, not just events.

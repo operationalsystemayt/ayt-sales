@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Check, X } from 'lucide-react'
 import { formatHarga, formatThousands, parseThousands } from '../../utils/currency'
 
-export default function HargaCell({ value, onSave }: { value?: number | null; onSave: (n: number) => void }) {
+export default function HargaCell({ value, onSave, disabled = false }: { value?: number | null; onSave: (n: number) => void; disabled?: boolean }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value ? formatThousands(String(value)) : '')
 
@@ -18,8 +18,8 @@ export default function HargaCell({ value, onSave }: { value?: number | null; on
   if (!editing) {
     return (
       <span
-        className="cursor-pointer hover:text-blue-600 hover:underline underline-offset-2 transition-colors"
-        onClick={() => { setDraft(value ? formatThousands(String(value)) : ''); setEditing(true) }}
+        className={disabled ? '' : 'cursor-pointer hover:text-blue-600 hover:underline underline-offset-2 transition-colors'}
+        onClick={() => { if (disabled) return; setDraft(value ? formatThousands(String(value)) : ''); setEditing(true) }}
       >
         {formatHarga(value)}
       </span>

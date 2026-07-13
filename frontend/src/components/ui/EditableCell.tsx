@@ -7,12 +7,14 @@ export default function EditableCell({
   type = 'text',
   options,
   renderValue,
+  disabled = false,
 }: {
   value: string
   onSave: (v: string) => void
   type?: 'text' | 'number' | 'select' | 'date'
   options?: { id: number | string; label: string }[]
   renderValue?: (value: string) => ReactNode
+  disabled?: boolean
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value)
@@ -29,8 +31,8 @@ export default function EditableCell({
   if (!editing) {
     return (
       <span
-        className={`cursor-pointer transition-colors ${renderValue ? '' : 'hover:text-blue-600 hover:underline underline-offset-2'}`}
-        onClick={() => { setDraft(value); setEditing(true) }}
+        className={disabled ? '' : `cursor-pointer transition-colors ${renderValue ? '' : 'hover:text-blue-600 hover:underline underline-offset-2'}`}
+        onClick={() => { if (disabled) return; setDraft(value); setEditing(true) }}
       >
         {renderValue ? renderValue(value) : (value || <span className="text-gray-300">—</span>)}
       </span>

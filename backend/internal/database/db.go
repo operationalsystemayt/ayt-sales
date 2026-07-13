@@ -66,6 +66,8 @@ func seed(db *gorm.DB) {
 	db.Model(&models.MasterResult{}).Where("name = ?", "Deal").Update("name", "Converted")
 	seedSettings(db)
 	seedCloseStatus(db)
+	seedManualStatus(db)
+	seedCountries(db)
 
 	var count int64
 	db.Model(&models.MasterSource{}).Count(&count)
@@ -126,6 +128,21 @@ func seed(db *gorm.DB) {
 		})
 	}
 
+	log.Println("Database seeded successfully")
+}
+
+// seedManualStatus adds the "Manual" lead status (assigned to leads created via
+// the manual-add form, which have no WhatsApp thread to derive a status from).
+func seedManualStatus(db *gorm.DB) {
+	var s models.MasterStatus
+	if err := db.Where("name = ?", "Manual").First(&s).Error; err != nil {
+		db.Create(&models.MasterStatus{Name: "Manual", Color: "purple"})
+	}
+}
+
+// seedCountries idempotently backfills any country missing from an already-provisioned
+// database, so re-running on an existing install picks up newly added destinations.
+func seedCountries(db *gorm.DB) {
 	countries := []models.Country{
 		{Name: "Jepang", Code: "JP", FlagURL: "🇯🇵"},
 		{Name: "Korea Selatan", Code: "KR", FlagURL: "🇰🇷"},
@@ -137,10 +154,21 @@ func seed(db *gorm.DB) {
 		{Name: "Kazakhstan", Code: "KZ", FlagURL: "🇰🇿"},
 		{Name: "Turki", Code: "TR", FlagURL: "🇹🇷"},
 		{Name: "Hongkong", Code: "HK", FlagURL: "🇭🇰"},
+		{Name: "Maldive", Code: "MV", FlagURL: "🇲🇻"},
+		{Name: "China", Code: "CN", FlagURL: "🇨🇳"},
+		{Name: "Switzerland", Code: "CH", FlagURL: "🇨🇭"},
+		{Name: "Madinah", Code: "MED", FlagURL: "🕌"},
+		{Name: "Mekkah", Code: "MEK", FlagURL: "🕋"},
+		{Name: "Russia", Code: "RU", FlagURL: "🇷🇺"},
+		{Name: "Kyrgyzstan", Code: "KG", FlagURL: "🇰🇬"},
+		{Name: "Australia", Code: "AU", FlagURL: "🇦🇺"},
 	}
-	db.Create(&countries)
-
-	log.Println("Database seeded successfully")
+	for _, c := range countries {
+		var existing models.Country
+		if err := db.Where("name = ?", c.Name).First(&existing).Error; err != nil {
+			db.Create(&c)
+		}
+	}
 }
 
 func seedSettings(db *gorm.DB) {
@@ -154,7 +182,13 @@ func seedSettings(db *gorm.DB) {
 		db.Delete(&old)
 	}
 
-	defaults := map[string]string{"dormant_hours": "12", "close_hours": "72"}
+	defaults := map[string]string{
+		"dormant_hours":        "12",
+		"close_hours":          "72",
+		"whatsapp_provider":    "waba",
+		"contact_dormant_days": "365",
+		"contact_active_days":  "60",
+	}
 	for k, v := range defaults {
 		var s models.Setting
 		if err := db.Where("key = ?", k).First(&s).Error; err != nil {

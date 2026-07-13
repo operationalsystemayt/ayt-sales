@@ -7,6 +7,8 @@ import Booking from './pages/Booking'
 import Setup from './pages/Setup'
 import Chat from './pages/Chat'
 import Settings from './pages/Settings'
+import CustomerPage from './pages/Customer'
+import Report from './pages/Report'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { token } = useAuthStore()
@@ -20,8 +22,10 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
         <Route path="/leads" element={<PrivateRoute><Leads /></PrivateRoute>} />
-        <Route path="/leads/:id/chat" element={<PrivateRoute><Chat /></PrivateRoute>} />
+        <Route path="/chat" element={<PrivateRoute><Chat /></PrivateRoute>} />
+        <Route path="/contact" element={<PrivateRoute><CustomerPage /></PrivateRoute>} />
         <Route path="/booking" element={<PrivateRoute><Booking /></PrivateRoute>} />
+        <Route path="/report" element={<PrivateRoute><Report /></PrivateRoute>} />
         <Route path="/setup" element={<PrivateRoute><Setup /></PrivateRoute>} />
         <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />

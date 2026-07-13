@@ -9,23 +9,12 @@ import (
 	"github.com/ayt-sales/backend/internal/models"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
-func GetLeads(c *gin.Context) {
-	var leads []models.Lead
-	q := database.DB.
-		Preload("Customer").
-		Preload("Sales").
-		Preload("Source").
-		Preload("Input").
-		Preload("Quality").
-		Preload("Status").
-		Preload("Result").
-		Preload("Product.Country").
-		Preload("Group").
-		Where("is_converted = false").
-		Order("created_at DESC")
-
+// leadListFilters applies the filter set shared by GetLeads and GetLeadsSummary, so the
+// summary cards always reflect exactly the rows currently visible in the table.
+func leadListFilters(c *gin.Context, q *gorm.DB) *gorm.DB {
 	if salesID := c.Query("sales_id"); salesID != "" {
 		q = q.Where("sales_id = ?", salesID)
 	}
@@ -47,6 +36,28 @@ func GetLeads(c *gin.Context) {
 	if dateTo := c.Query("date_to"); dateTo != "" {
 		q = q.Where("date_received <= ?", dateTo)
 	}
+	if search := c.Query("search"); search != "" {
+		like := "%" + search + "%"
+		q = q.Where("customer_id IN (?)",
+			database.DB.Model(&models.Customer{}).Select("id").Where("full_name ILIKE ? OR phone ILIKE ?", like, like))
+	}
+	return q
+}
+
+func GetLeads(c *gin.Context) {
+	var leads []models.Lead
+	q := leadListFilters(c, database.DB.
+		Preload("Customer").
+		Preload("Sales").
+		Preload("Source").
+		Preload("Input").
+		Preload("Quality").
+		Preload("Status").
+		Preload("Result").
+		Preload("Product.Countries").
+		Preload("Group").
+		Where("is_converted = false")).
+		Order("updated_at DESC")
 
 	q.Find(&leads)
 
@@ -58,6 +69,53 @@ func GetLeads(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, leads)
+}
+
+// GetLeadsSummary powers the Leads & Prospects summary cards. total_leads counts every
+// lead matching the current filters (including already-converted ones, since Convert/Cancel
+// are outcomes of the funnel); the pipeline-state buckets (Need Response/Waiting/Dormant)
+// are further scoped to is_converted = false since a converted lead has left the pipeline.
+func GetLeadsSummary(c *gin.Context) {
+	var totalLeads int64
+	leadListFilters(c, database.DB.Model(&models.Lead{})).Count(&totalLeads)
+
+	countByResult := func(name string) int64 {
+		var n int64
+		leadListFilters(c, database.DB.Model(&models.Lead{})).
+			Joins("JOIN master_results ON master_results.id = leads.result_id").
+			Where("master_results.name = ?", name).Count(&n)
+		return n
+	}
+	countByStatus := func(name string) int64 {
+		var n int64
+		leadListFilters(c, database.DB.Model(&models.Lead{})).
+			Where("is_converted = false").
+			Joins("JOIN master_statuses ON master_statuses.id = leads.status_id").
+			Where("master_statuses.name = ?", name).Count(&n)
+		return n
+	}
+
+	convert := countByResult("Converted")
+	cancel := countByResult("Cancel")
+	needResponse := countByStatus("Need Response")
+	waitingCustomer := countByStatus("Waiting Customer")
+	dormant := countByStatus("Dormant")
+
+	pct := func(n int64) float64 {
+		if totalLeads == 0 {
+			return 0
+		}
+		return float64(n) / float64(totalLeads) * 100
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"total_leads":      totalLeads,
+		"convert":          gin.H{"count": convert, "pct": pct(convert)},
+		"cancel":           gin.H{"count": cancel, "pct": pct(cancel)},
+		"need_response":    gin.H{"count": needResponse, "pct": pct(needResponse)},
+		"waiting_customer": gin.H{"count": waitingCustomer, "pct": pct(waitingCustomer)},
+		"dormant":          gin.H{"count": dormant, "pct": pct(dormant)},
+	})
 }
 
 // statusIDsByName resolves the MasterStatus IDs used by the on-the-fly status recompute below.
@@ -152,10 +210,7 @@ func CreateLead(c *gin.Context) {
 		database.DB.Save(&customer)
 	}
 
-	// Generate lead no
-	var count int64
-	database.DB.Model(&models.Lead{}).Count(&count)
-	leadNo := fmt.Sprintf("L-%06d", count+1)
+	leadNo := nextLeadNo()
 
 	var dateReceived *time.Time
 	if req.DateReceived != "" {
@@ -182,6 +237,17 @@ func CreateLead(c *gin.Context) {
 		totalPrice = &t
 	}
 
+	// Leads created through this endpoint are always manual entry (not connected to
+	// WhatsApp), so status is forced to "Manual" rather than left to the client —
+	// the automatic Need Response/Waiting Customer/Dormant states only make sense
+	// for leads with a chat thread.
+	var manualStatus models.MasterStatus
+	database.DB.Where("name = ?", "Manual").First(&manualStatus)
+	statusID := req.StatusID
+	if manualStatus.ID != 0 {
+		statusID = &manualStatus.ID
+	}
+
 	lead := models.Lead{
 		ID:           uuid.New(),
 		CustomerID:   customer.ID,
@@ -190,7 +256,7 @@ func CreateLead(c *gin.Context) {
 		SourceID:     req.SourceID,
 		InputID:      req.InputID,
 		QualityID:    req.QualityID,
-		StatusID:     req.StatusID,
+		StatusID:     statusID,
 		ResultID:     req.ResultID,
 		ProductID:    req.ProductID,
 		GroupID:      req.GroupID,
@@ -216,7 +282,7 @@ func CreateLead(c *gin.Context) {
 	})
 
 	database.DB.Preload("Customer").Preload("Sales").Preload("Source").Preload("Input").
-		Preload("Quality").Preload("Status").Preload("Result").Preload("Product.Country").
+		Preload("Quality").Preload("Status").Preload("Result").Preload("Product.Countries").
 		Preload("Group").First(&lead, "id = ?", lead.ID)
 
 	c.JSON(http.StatusCreated, lead)
@@ -356,7 +422,7 @@ func UpdateLead(c *gin.Context) {
 
 	database.DB.Model(&lead).Updates(updates)
 	database.DB.Preload("Customer").Preload("Sales").Preload("Source").Preload("Input").
-		Preload("Quality").Preload("Status").Preload("Result").Preload("Product.Country").
+		Preload("Quality").Preload("Status").Preload("Result").Preload("Product.Countries").
 		Preload("Group").First(&lead, "id = ?", id)
 
 	c.JSON(http.StatusOK, lead)

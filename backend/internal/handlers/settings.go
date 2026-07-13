@@ -20,8 +20,11 @@ func GetSettings(c *gin.Context) {
 }
 
 type UpdateSettingsRequest struct {
-	DormantHours *int `json:"dormant_hours"`
-	CloseHours   *int `json:"close_hours"`
+	DormantHours       *int    `json:"dormant_hours"`
+	CloseHours         *int    `json:"close_hours"`
+	Provider           *string `json:"whatsapp_provider"`
+	ContactDormantDays *int    `json:"contact_dormant_days"`
+	ContactActiveDays  *int    `json:"contact_active_days"`
 }
 
 func upsertSetting(key, value string) {
@@ -55,11 +58,33 @@ func UpdateSettings(c *gin.Context) {
 		return
 	}
 
+	if req.Provider != nil && *req.Provider != "waba" && *req.Provider != "waha" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "whatsapp_provider harus 'waba' atau 'waha'"})
+		return
+	}
+
 	if req.DormantHours != nil {
 		upsertSetting("dormant_hours", strconv.Itoa(*req.DormantHours))
 	}
 	if req.CloseHours != nil {
 		upsertSetting("close_hours", strconv.Itoa(*req.CloseHours))
+	}
+	if req.Provider != nil {
+		upsertSetting("whatsapp_provider", *req.Provider)
+	}
+	if req.ContactDormantDays != nil {
+		if *req.ContactDormantDays <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "contact_dormant_days harus > 0"})
+			return
+		}
+		upsertSetting("contact_dormant_days", strconv.Itoa(*req.ContactDormantDays))
+	}
+	if req.ContactActiveDays != nil {
+		if *req.ContactActiveDays <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "contact_active_days harus > 0"})
+			return
+		}
+		upsertSetting("contact_active_days", strconv.Itoa(*req.ContactActiveDays))
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Settings updated"})

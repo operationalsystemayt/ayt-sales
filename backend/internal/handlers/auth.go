@@ -107,6 +107,10 @@ func CreateUser(c *gin.Context) {
 	if role == "" {
 		role = "sales"
 	}
+	if role != "admin" && role != "sales" && role != "viewer" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "role harus admin, sales, atau viewer"})
+		return
+	}
 
 	user := models.User{
 		ID:           uuid.New(),

@@ -3,8 +3,9 @@ export interface User {
   full_name: string
   email: string
   phone?: string
-  role: 'admin' | 'sales'
+  role: 'admin' | 'sales' | 'viewer'
   avatar?: string
+  is_active?: boolean
 }
 
 export interface MasterSource { id: number; name: string }
@@ -19,8 +20,7 @@ export interface Product {
   id: number
   product_name: string
   trip_type: string
-  country_id?: number
-  country?: Country
+  countries?: Country[]
   duration_days: number
   price_per_pax: number
   is_active: boolean
@@ -31,6 +31,21 @@ export interface Customer {
   full_name: string
   phone: string
   email?: string
+  address?: string
+  notes?: string
+  is_favorite: boolean
+  is_saved: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface ContactSummary {
+  total_contact: number
+  total_dormant: number
+  total_active: number
+  total_plain: number
+  dormant_days: number
+  active_days: number
 }
 
 export interface Lead {
@@ -61,10 +76,49 @@ export interface Lead {
   deal_date?: string
   follow_up_date?: string
   last_chat_at?: string
+  last_read_at?: string
   notes?: string
   is_converted: boolean
+  is_archived: boolean
   created_at: string
   updated_at: string
+}
+
+export interface ChatInboxItem extends Lead {
+  last_message: Chat | null
+  unread_count: number
+}
+
+export interface ChatSummary {
+  total: number
+  need_response: number
+  waiting_customer: number
+  dormant: number
+  selesai_hari_ini: number
+  sla_buckets: {
+    over_30m: number
+    '15_30m': number
+    '5_15m': number
+    under_5m: number
+  }
+}
+
+export interface LeadActivity {
+  id: string
+  lead_id: string
+  activity: string
+  notes?: string
+  created_by?: string
+  creator?: User
+  created_at: string
+}
+
+export interface CustomerSummary {
+  recent_lead?: Lead
+  active_booking?: Booking
+  total_bookings: number
+  total_spent: number
+  latest_note?: LeadActivity
 }
 
 export interface Chat {
@@ -75,12 +129,40 @@ export interface Chat {
   from_phone?: string
   body: string
   chat_timestamp: string
+  provider_message_id?: string
   created_at: string
 }
 
 export interface Settings {
   dormant_hours: string
   close_hours: string
+  whatsapp_provider: string
+  contact_dormant_days?: string
+  contact_active_days?: string
+}
+
+export interface LeadsSummaryBucket {
+  count: number
+  pct: number
+}
+
+export interface LeadsSummary {
+  total_leads: number
+  convert: LeadsSummaryBucket
+  cancel: LeadsSummaryBucket
+  need_response: LeadsSummaryBucket
+  waiting_customer: LeadsSummaryBucket
+  dormant: LeadsSummaryBucket
+}
+
+export interface ReportSalesRow {
+  sales_id: string
+  full_name: string
+  avatar?: string
+  leads_count: number
+  closing_count: number
+  total_pax: number
+  revenue: number
 }
 
 export interface Booking {
@@ -97,8 +179,7 @@ export interface Booking {
   group?: ProductGroup
   source_id?: number
   source?: MasterSource
-  country_id?: number
-  country?: Country
+  countries?: Country[]
   lead?: Lead
   booking_date: string
   departure_date?: string

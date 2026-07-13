@@ -61,8 +61,7 @@ type ProductGroup struct {
 
 type Product struct {
 	ID           uint      `gorm:"primaryKey;autoIncrement" json:"id"`
-	CountryID    *uint     `json:"country_id"`
-	Country      *Country  `gorm:"foreignKey:CountryID" json:"country,omitempty"`
+	Countries    []Country `gorm:"many2many:product_countries;" json:"countries,omitempty"`
 	ProductName  string    `gorm:"type:varchar(200);not null" json:"product_name"`
 	TripType     string    `gorm:"type:varchar(30)" json:"trip_type"`
 	DurationDays int       `json:"duration_days"`
@@ -91,6 +90,9 @@ type Customer struct {
 	BirthDate      *time.Time `gorm:"type:date" json:"birth_date"`
 	PassportNumber string     `gorm:"type:varchar(100)" json:"passport_number"`
 	Address        string     `gorm:"type:text" json:"address"`
+	Notes          string     `gorm:"type:text" json:"notes"`
+	IsFavorite     bool       `gorm:"default:false" json:"is_favorite"`
+	IsSaved        bool       `gorm:"default:false" json:"is_saved"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
 }
@@ -123,8 +125,10 @@ type Lead struct {
 	DealDate     *time.Time     `gorm:"type:date" json:"deal_date"`
 	FollowUpDate *time.Time     `gorm:"type:date" json:"follow_up_date"`
 	LastChatAt   *time.Time     `json:"last_chat_at"`
+	LastReadAt   *time.Time     `json:"last_read_at"`
 	Notes        string         `gorm:"type:text" json:"notes"`
 	IsConverted  bool           `gorm:"default:false" json:"is_converted"`
+	IsArchived   bool           `gorm:"default:false" json:"is_archived"`
 	ConvertedAt  *time.Time     `json:"converted_at"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
@@ -145,8 +149,7 @@ type Booking struct {
 	Group            *ProductGroup  `gorm:"foreignKey:GroupID" json:"group,omitempty"`
 	SourceID         *uint          `json:"source_id"`
 	Source           *MasterSource  `gorm:"foreignKey:SourceID" json:"source,omitempty"`
-	CountryID        *uint          `json:"country_id"`
-	Country          *Country       `gorm:"foreignKey:CountryID" json:"country,omitempty"`
+	Countries        []Country      `gorm:"many2many:booking_countries;" json:"countries,omitempty"`
 	Lead             *Lead          `gorm:"foreignKey:LeadID" json:"lead,omitempty"`
 	DepartureID      *uint          `json:"departure_id"`
 	Departure        *Departure     `gorm:"foreignKey:DepartureID" json:"departure,omitempty"`
@@ -187,15 +190,16 @@ type LeadActivity struct {
 }
 
 type Chat struct {
-	ID            uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
-	LeadID        uuid.UUID  `gorm:"type:uuid;not null;index" json:"lead_id"`
-	CustomerID    uuid.UUID  `gorm:"type:uuid;not null" json:"customer_id"`
-	Direction     string     `gorm:"type:varchar(10);not null" json:"direction"` // "in" | "out"
-	FromPhone     string     `gorm:"type:varchar(30)" json:"from_phone"`
-	Body          string     `gorm:"type:text" json:"body"`
-	ChatTimestamp time.Time  `json:"chat_timestamp"`
-	CreatedBy     *uuid.UUID `gorm:"type:uuid" json:"created_by,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
+	ID                uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	LeadID            uuid.UUID  `gorm:"type:uuid;not null;index" json:"lead_id"`
+	CustomerID        uuid.UUID  `gorm:"type:uuid;not null" json:"customer_id"`
+	Direction         string     `gorm:"type:varchar(10);not null" json:"direction"` // "in" | "out"
+	FromPhone         string     `gorm:"type:varchar(30)" json:"from_phone"`
+	Body              string     `gorm:"type:text" json:"body"`
+	ChatTimestamp     time.Time  `json:"chat_timestamp"`
+	ProviderMessageID *string    `gorm:"type:varchar(200);index" json:"provider_message_id,omitempty"`
+	CreatedBy         *uuid.UUID `gorm:"type:uuid" json:"created_by,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
 }
 
 type Setting struct {

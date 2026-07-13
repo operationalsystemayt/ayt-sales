@@ -17,8 +17,8 @@ func GetBookings(c *gin.Context) {
 	q := database.DB.
 		Preload("Customer").
 		Preload("Sales").
-		Preload("Product.Country").
-		Preload("Country").
+		Preload("Product.Countries").
+		Preload("Countries").
 		Preload("Lead").
 		Order("created_at DESC")
 
@@ -97,7 +97,7 @@ type CreateBookingRequest struct {
 	SalesID       string  `json:"sales_id"`
 	LeadID        string  `json:"lead_id"`
 	ProductID     uint    `json:"product_id" binding:"required"`
-	CountryID     *uint   `json:"country_id"`
+	CountryIDs    []uint  `json:"country_ids"`
 	DepartureDate string  `json:"departure_date" binding:"required"`
 	Pax           int     `json:"pax" binding:"required,min=1"`
 	PricePerPax   float64 `json:"price_per_pax" binding:"required"`
@@ -142,11 +142,13 @@ func CreateBooking(c *gin.Context) {
 		leadID = &lid
 	}
 
-	countryID := req.CountryID
-	if countryID == nil {
+	countryIDs := req.CountryIDs
+	if len(countryIDs) == 0 {
 		var product models.Product
-		if err := database.DB.First(&product, req.ProductID).Error; err == nil {
-			countryID = product.CountryID
+		if err := database.DB.Preload("Countries").First(&product, req.ProductID).Error; err == nil {
+			for _, co := range product.Countries {
+				countryIDs = append(countryIDs, co.ID)
+			}
 		}
 	}
 
@@ -157,7 +159,6 @@ func CreateBooking(c *gin.Context) {
 		SalesID:          salesID,
 		LeadID:           leadID,
 		ProductID:        &req.ProductID,
-		CountryID:        countryID,
 		BookingDate:      now,
 		DepartureDate:    &departureDate,
 		Pax:              req.Pax,
@@ -173,14 +174,23 @@ func CreateBooking(c *gin.Context) {
 		return
 	}
 
-	database.DB.Preload("Customer").Preload("Sales").Preload("Product.Country").Preload("Country").Preload("Lead").First(&booking, "id = ?", booking.ID)
+	if len(countryIDs) > 0 {
+		var countries []models.Country
+		database.DB.Where("id IN ?", countryIDs).Find(&countries)
+		database.DB.Model(&booking).Association("Countries").Replace(countries)
+	}
+
+	database.DB.Preload("Customer").Preload("Sales").Preload("Product.Countries").Preload("Countries").Preload("Lead").First(&booking, "id = ?", booking.ID)
 	c.JSON(http.StatusCreated, booking)
 }
 
 type UpdateBookingRequest struct {
+	CustomerName  *string  `json:"customer_name"`
+	Phone         *string  `json:"phone"`
 	SalesID       *string  `json:"sales_id"`
 	ProductID     *uint    `json:"product_id"`
-	CountryID     *uint    `json:"country_id"`
+	CountryIDs    *[]uint  `json:"country_ids"`
+	BookingDate   *string  `json:"booking_date"`
 	DepartureDate *string  `json:"departure_date"`
 	Pax           *int     `json:"pax"`
 	PricePerPax   *float64 `json:"price_per_pax"`
@@ -209,9 +219,6 @@ func UpdateBooking(c *gin.Context) {
 	if req.ProductID != nil {
 		updates["product_id"] = req.ProductID
 	}
-	if req.CountryID != nil {
-		updates["country_id"] = req.CountryID
-	}
 	if req.Pax != nil {
 		updates["pax"] = req.Pax
 	}
@@ -220,6 +227,11 @@ func UpdateBooking(c *gin.Context) {
 	}
 	if req.Notes != nil {
 		updates["notes"] = req.Notes
+	}
+	if req.BookingDate != nil {
+		if t, err := time.Parse("2006-01-02", *req.BookingDate); err == nil {
+			updates["booking_date"] = t
+		}
 	}
 	if req.DepartureDate != nil {
 		t, _ := time.Parse("2006-01-02", *req.DepartureDate)
@@ -247,7 +259,29 @@ func UpdateBooking(c *gin.Context) {
 	updates["remaining_payment"] = newTotal - booking.TotalPaid
 
 	database.DB.Model(&booking).Updates(updates)
-	database.DB.Preload("Customer").Preload("Sales").Preload("Product.Country").Preload("Country").Preload("Lead").First(&booking, "id = ?", id)
+
+	if req.CountryIDs != nil {
+		var countries []models.Country
+		if len(*req.CountryIDs) > 0 {
+			database.DB.Where("id IN ?", *req.CountryIDs).Find(&countries)
+		}
+		database.DB.Model(&booking).Association("Countries").Replace(countries)
+	}
+
+	if req.CustomerName != nil || req.Phone != nil {
+		custUpdates := map[string]interface{}{}
+		if req.CustomerName != nil && *req.CustomerName != "" {
+			custUpdates["full_name"] = *req.CustomerName
+		}
+		if req.Phone != nil && *req.Phone != "" {
+			custUpdates["phone"] = *req.Phone
+		}
+		if len(custUpdates) > 0 {
+			database.DB.Model(&models.Customer{}).Where("id = ?", booking.CustomerID).Updates(custUpdates)
+		}
+	}
+
+	database.DB.Preload("Customer").Preload("Sales").Preload("Product.Countries").Preload("Countries").Preload("Lead").First(&booking, "id = ?", id)
 	c.JSON(http.StatusOK, booking)
 }
 
