@@ -12,7 +12,7 @@ import (
 
 func GetCustomers(c *gin.Context) {
 	var customers []models.Customer
-	q := database.DB.Order("updated_at DESC")
+	q := scopeCustomerFilter(c, database.DB.Order("updated_at DESC"))
 
 	if saved := c.Query("saved"); saved != "" {
 		q = q.Where("is_saved = ?", saved == "true")
@@ -37,6 +37,10 @@ func UpdateCustomer(c *gin.Context) {
 	var customer models.Customer
 	if err := database.DB.First(&customer, "id = ?", id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Customer not found"})
+		return
+	}
+	if !ownsCustomer(c, id) {
+		forbidden(c)
 		return
 	}
 
@@ -69,6 +73,10 @@ func SaveCustomer(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Customer not found"})
 		return
 	}
+	if !ownsCustomer(c, id) {
+		forbidden(c)
+		return
+	}
 	database.DB.Model(&customer).Update("is_saved", true)
 	c.JSON(http.StatusOK, gin.H{"message": "Customer saved"})
 }
@@ -82,23 +90,23 @@ func GetContactSummary(c *gin.Context) {
 	activeDays := getIntSetting("contact_active_days", 60)
 
 	var totalContact int64
-	database.DB.Model(&models.Customer{}).Count(&totalContact)
+	scopeCustomerFilter(c, database.DB.Model(&models.Customer{})).Count(&totalContact)
 
 	var totalActive int64
-	database.DB.Model(&models.Customer{}).
+	scopeCustomerFilter(c, database.DB.Model(&models.Customer{})).
 		Where("EXISTS (SELECT 1 FROM bookings b WHERE b.customer_id = customers.id AND b.deleted_at IS NULL AND b.booking_date >= ?)",
 			time.Now().AddDate(0, 0, -activeDays)).
 		Count(&totalActive)
 
 	var totalDormant int64
-	database.DB.Model(&models.Customer{}).
+	scopeCustomerFilter(c, database.DB.Model(&models.Customer{})).
 		Where(`EXISTS (SELECT 1 FROM bookings b WHERE b.customer_id = customers.id AND b.deleted_at IS NULL)
 		       AND NOT EXISTS (SELECT 1 FROM bookings b2 WHERE b2.customer_id = customers.id AND b2.deleted_at IS NULL AND b2.booking_date >= ?)`,
 			time.Now().AddDate(0, 0, -dormantDays)).
 		Count(&totalDormant)
 
 	var totalPlain int64
-	database.DB.Model(&models.Customer{}).
+	scopeCustomerFilter(c, database.DB.Model(&models.Customer{})).
 		Where(`EXISTS (SELECT 1 FROM leads l WHERE l.customer_id = customers.id AND l.deleted_at IS NULL)
 		       AND NOT EXISTS (SELECT 1 FROM bookings b3 WHERE b3.customer_id = customers.id AND b3.deleted_at IS NULL)`).
 		Count(&totalPlain)
@@ -116,6 +124,10 @@ func GetContactSummary(c *gin.Context) {
 // GetCustomerSummary powers the Chat inbox's right-hand relationship panel.
 func GetCustomerSummary(c *gin.Context) {
 	id := c.Param("id")
+	if !ownsCustomer(c, id) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Customer not found"})
+		return
+	}
 
 	var recentLead models.Lead
 	database.DB.Preload("Result").Preload("Product").Where("customer_id = ?", id).

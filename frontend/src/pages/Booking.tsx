@@ -16,6 +16,7 @@ import { formatThousands, parseThousands } from '../utils/currency'
 import { BOOKING_STATUSES } from '../constants/bookingStatus'
 import { getDateRange, fmtISODate, type Period } from '../utils/dateRange'
 import { useCanEdit } from '../hooks/useCanEdit'
+import { useAuthStore } from '../store/auth'
 import {
   getBookings, getBookingSummary, createBooking, updateBooking,
   getUsers, getProducts, getCountries, getPayments, addPayment, deletePayment,
@@ -59,6 +60,8 @@ function isUnpaidSoon(b: Booking): boolean {
 
 export default function BookingPage() {
   const canEdit = useCanEdit()
+  const { user: currentUser } = useAuthStore()
+  const isSales = currentUser?.role === 'sales'
   const [bookings, setBookings] = useState<Booking[]>([])
   const [summary, setSummary] = useState<BookingSummary | null>(null)
   const [page, setPage] = useState(1)
@@ -199,10 +202,12 @@ export default function BookingPage() {
 
       {/* Filters */}
       <div className="bg-white border border-gray-100 rounded-2xl p-3 mb-4 flex flex-wrap gap-2 items-center shadow-sm">
-        <select className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-400" value={filters.sales_id} onChange={(e) => { setFilters({ ...filters, sales_id: e.target.value }); setPage(1) }}>
-          <option value="">Sales: Semua</option>
-          {users.filter(u=>u.role==='sales').map(u=><option key={u.id} value={u.id}>{u.full_name}</option>)}
-        </select>
+        {!isSales && (
+          <select className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-400" value={filters.sales_id} onChange={(e) => { setFilters({ ...filters, sales_id: e.target.value }); setPage(1) }}>
+            <option value="">Sales: Semua</option>
+            {users.filter(u=>u.role==='sales').map(u=><option key={u.id} value={u.id}>{u.full_name}</option>)}
+          </select>
+        )}
         <select className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-400" value={filters.status} onChange={(e) => { setFilters({ ...filters, status: e.target.value }); setPage(1) }}>
           <option value="">Status: Semua</option>
           {BOOKING_STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
@@ -262,7 +267,7 @@ export default function BookingPage() {
                       options={users.filter(u=>u.role==='sales').map((u) => ({ id: u.id, label: u.full_name }))}
                       onSave={(v) => handleFieldUpdate(b.id, 'sales_id', v)}
                       renderValue={() => b.sales ? <Avatar name={b.sales.full_name} src={b.sales.avatar} /> : <span className="text-gray-300">-</span>}
-                      disabled={!canEdit}
+                      disabled={!canEdit || isSales}
                     />
                   </td>
                   <td className="px-3 py-3">
@@ -393,7 +398,7 @@ export default function BookingPage() {
           {[
             { label: 'Nama Customer *', key: 'customer_name', type: 'text', placeholder: 'Nama lengkap' },
             { label: 'No. HP *', key: 'phone', type: 'text', placeholder: '0812-3456-7890' },
-            { label: 'Sales', key: 'sales_id', type: 'select', options: users.filter(u=>u.role==='sales').map(u=>({id:u.id,name:u.full_name})) },
+            ...(isSales ? [] : [{ label: 'Sales', key: 'sales_id', type: 'select', options: users.filter(u=>u.role==='sales').map(u=>({id:u.id,name:u.full_name})) }]),
             { label: 'Produk *', key: 'product_id', type: 'select', options: products.map(p=>({id:p.id,name:p.product_name})) },
             { label: 'Tanggal Keberangkatan *', key: 'departure_date', type: 'date' },
             { label: 'Jumlah Pax *', key: 'pax', type: 'number', placeholder: '1' },

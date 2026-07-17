@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import { DollarSign, Users, ShoppingCart, UserCheck, Target, BarChart2, Trophy } from 'lucide-react'
+import { DollarSign, Users, ShoppingCart, UserCheck, Target, BarChart2, Trophy, RefreshCw, Megaphone, TrendingUp } from 'lucide-react'
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, Legend
 } from 'recharts'
 import Layout from '../components/Layout/Layout'
 import {
   getDashboardSummary, getDashboardLeaderboard, getDashboardTopProducts,
-  getDashboardChart, getTopTrips
+  getDashboardChart, getTopTrips, syncDashboardAds
 } from '../services/api'
 import type { DashboardSummary, LeaderboardRow, TopProductRow, ChartRow } from '../types'
 import Avatar from '../components/ui/Avatar'
@@ -51,15 +51,41 @@ export default function Dashboard() {
   const [topProducts, setTopProducts] = useState<TopProductRow[]>([])
   const [chartData, setChartData] = useState<ChartRow[]>([])
   const [topTrips, setTopTrips] = useState<{ trip_type: string; total_pax: number; revenue: number }[]>([])
+  const [syncingAds, setSyncingAds] = useState(false)
+  const [adsSyncError, setAdsSyncError] = useState<string | null>(null)
+
+  const fetchChart = (params: { date_from: string; date_to: string }) =>
+    getDashboardChart(params).then((r) => setChartData(r.data ?? [])).catch((e) => console.error('[Dashboard] chart:', e))
 
   useEffect(() => {
     const params = getDateRange(period)
     getDashboardSummary(params).then((r) => setSummary(r.data)).catch((e) => console.error('[Dashboard] summary:', e))
     getDashboardLeaderboard(params).then((r) => setLeaderboard(r.data ?? [])).catch((e) => console.error('[Dashboard] leaderboard:', e))
     getDashboardTopProducts(params).then((r) => setTopProducts(r.data ?? [])).catch((e) => console.error('[Dashboard] top-products:', e))
-    getDashboardChart(params).then((r) => setChartData(r.data ?? [])).catch((e) => console.error('[Dashboard] chart:', e))
+    fetchChart(params)
     getTopTrips(params).then((r) => setTopTrips(r.data ?? [])).catch((e) => console.error('[Dashboard] top-trips:', e))
   }, [period])
+
+  const handleSyncAds = async () => {
+    const params = getDateRange(period)
+    setSyncingAds(true)
+    setAdsSyncError(null)
+    try {
+      await syncDashboardAds(params)
+      await fetchChart(params)
+    } catch (e: any) {
+      console.error('[Dashboard] ads sync:', e)
+      setAdsSyncError(e?.response?.data?.error ?? 'Gagal sync Meta Ads')
+    } finally {
+      setSyncingAds(false)
+    }
+  }
+
+  const totalAdSpend = chartData.reduce((sum, r) => sum + (r.ad_spend ?? 0), 0)
+  const totalRevenue = chartData.reduce((sum, r) => sum + (r.revenue ?? 0), 0)
+  const totalAdsConversations = chartData.reduce((sum, r) => sum + (r.ads_conversations ?? 0), 0)
+  const costPerLead = totalAdsConversations > 0 ? totalAdSpend / totalAdsConversations : 0
+  const roas = totalAdSpend > 0 ? totalRevenue / totalAdSpend : 0
 
   const kpis = summary
     ? [
@@ -69,6 +95,12 @@ export default function Dashboard() {
         { label: 'Peserta', value: `${fmt(summary.peserta)} Pax`, icon: UserCheck, color: 'text-yellow-600 bg-yellow-50', trend: null },
         { label: 'CR Pemesan', value: `${summary.cr_pemesan.toFixed(1)}%`, icon: Target, color: 'text-indigo-600 bg-indigo-50', trend: null },
         { label: 'CR Peserta', value: `${summary.cr_peserta.toFixed(1)}%`, icon: BarChart2, color: 'text-teal-600 bg-teal-50', trend: null },
+        ...(totalAdSpend > 0
+          ? [
+              { label: 'Cost / Lead (Ads)', value: `Rp ${fmt(costPerLead)}`, icon: Megaphone, color: 'text-red-600 bg-red-50', trend: null },
+              { label: 'ROAS', value: `${roas.toFixed(2)}x`, icon: TrendingUp, color: 'text-orange-600 bg-orange-50', trend: null },
+            ]
+          : []),
       ]
     : []
 
@@ -77,7 +109,7 @@ export default function Dashboard() {
   return (
     <Layout title="Dashboard">
       {/* Period filter */}
-      <div className="flex items-center gap-2 mb-6">
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
         <span className="text-sm text-gray-500 font-medium">Periode</span>
         <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
           {PERIODS.map(({ key, label }) => (
@@ -94,7 +126,17 @@ export default function Dashboard() {
             </button>
           ))}
         </div>
+        <button
+          onClick={handleSyncAds}
+          disabled={syncingAds}
+          className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg font-medium bg-blue-50 text-blue-600 hover:bg-blue-100 disabled:opacity-50 transition-all"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${syncingAds ? 'animate-spin' : ''}`} />
+          {syncingAds ? 'Sync...' : 'Sync Meta Ads'}
+        </button>
       </div>
+      {adsSyncError && <p className="text-xs text-red-500 mb-2">{adsSyncError}</p>}
+      <div className="mb-4" />
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
@@ -124,12 +166,18 @@ export default function Dashboard() {
                     <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.15} />
                     <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
                   </linearGradient>
+                  <linearGradient id="colorSpend" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.15} />
+                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                  </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="day" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => fmt(v)} />
-                <Tooltip formatter={(v: number) => [`Rp ${fmt(v)}`, 'Penjualan']} />
-                <Area type="monotone" dataKey="revenue" stroke="#3b82f6" strokeWidth={2} fill="url(#colorRev)" dot={false} />
+                <Tooltip formatter={(v: number, name: string) => [`Rp ${fmt(v)}`, name]} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Area type="monotone" dataKey="revenue" stroke="#3b82f6" strokeWidth={2} fill="url(#colorRev)" dot={false} name="Penjualan" />
+                <Area type="monotone" dataKey="ad_spend" stroke="#ef4444" strokeWidth={2} fill="url(#colorSpend)" dot={false} name="Spend Meta Ads" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -143,6 +191,8 @@ export default function Dashboard() {
                 <XAxis dataKey="day" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
                 <Tooltip />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Line type="monotone" dataKey="ads_conversations" stroke="#f97316" strokeWidth={2} dot={{ r: 3 }} name="Chat dari Iklan" />
                 <Line type="monotone" dataKey="leads" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} name="Leads" />
                 <Line type="monotone" dataKey="closing" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} name="Closing" />
               </LineChart>

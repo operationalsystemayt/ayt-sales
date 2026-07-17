@@ -12,6 +12,7 @@ import { formatThousands, parseThousands, formatHarga } from '../utils/currency'
 import { BOOKING_STATUSES } from '../constants/bookingStatus'
 import { getDateRange, fmtISODate, type Period } from '../utils/dateRange'
 import { useCanEdit } from '../hooks/useCanEdit'
+import { useAuthStore } from '../store/auth'
 import {
   getLeads, getLeadsSummary, createLead, updateLead, deleteLead, bulkUpdateLeads,
   convertLeadToBooking, getUsers, getMasterSources, getMasterInputs,
@@ -38,6 +39,8 @@ const PAGE_SIZE = 20
 export default function Leads() {
   const navigate = useNavigate()
   const canEdit = useCanEdit()
+  const { user: currentUser } = useAuthStore()
+  const isSales = currentUser?.role === 'sales'
   const [leads, setLeads] = useState<Lead[]>([])
   const [summary, setSummary] = useState<LeadsSummary | null>(null)
   const [page, setPage] = useState(1)
@@ -265,10 +268,12 @@ export default function Leads() {
           <input value={filters.search} onChange={(e) => { setFilters({ ...filters, search: e.target.value }); setPage(1) }} placeholder="Cari nama / no. HP..."
             className="pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400 w-48" />
         </div>
-        <select className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-400" value={filters.sales_id} onChange={(e) => { setFilters({ ...filters, sales_id: e.target.value }); setPage(1) }}>
-          <option value="">Sales: Semua</option>
-          {users.filter((u) => u.role === 'sales').map((u) => <option key={u.id} value={u.id}>{u.full_name}</option>)}
-        </select>
+        {!isSales && (
+          <select className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-400" value={filters.sales_id} onChange={(e) => { setFilters({ ...filters, sales_id: e.target.value }); setPage(1) }}>
+            <option value="">Sales: Semua</option>
+            {users.filter((u) => u.role === 'sales').map((u) => <option key={u.id} value={u.id}>{u.full_name}</option>)}
+          </select>
+        )}
         <select className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-400" value={filters.status_id} onChange={(e) => { setFilters({ ...filters, status_id: e.target.value }); setPage(1) }}>
           <option value="">Status: Semua</option>
           {statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -504,7 +509,7 @@ export default function Leads() {
       <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Tambah Data Lead" size="lg">
         <div className="p-6 grid grid-cols-2 gap-4">
           {[
-            { label: 'Sales *', key: 'sales_id', type: 'select', options: users.filter(u=>u.role==='sales').map(u=>({id:u.id,name:u.full_name})) },
+            ...(isSales ? [] : [{ label: 'Sales *', key: 'sales_id', type: 'select', options: users.filter(u=>u.role==='sales').map(u=>({id:u.id,name:u.full_name})) }]),
             { label: 'Tanggal Masuk *', key: 'date_received', type: 'date' },
             { label: 'No. HP *', key: 'phone', type: 'text', placeholder: '0812-3456-7890' },
             { label: 'Nama Customer *', key: 'customer_name', type: 'text', placeholder: 'Masukkan nama customer' },

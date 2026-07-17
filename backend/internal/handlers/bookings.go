@@ -22,9 +22,7 @@ func GetBookings(c *gin.Context) {
 		Preload("Lead").
 		Order("created_at DESC")
 
-	if salesID := c.Query("sales_id"); salesID != "" {
-		q = q.Where("sales_id = ?", salesID)
-	}
+	q = scopeSalesFilter(c, q)
 	if status := c.Query("status"); status != "" {
 		q = q.Where("booking_status = ?", status)
 	}
@@ -46,9 +44,7 @@ func GetBookings(c *gin.Context) {
 // summary cards always reflect exactly the rows currently visible in the table.
 func bookingSummaryFilters(c *gin.Context) *gorm.DB {
 	q := database.DB.Model(&models.Booking{})
-	if salesID := c.Query("sales_id"); salesID != "" {
-		q = q.Where("sales_id = ?", salesID)
-	}
+	q = scopeSalesFilter(c, q)
 	if status := c.Query("status"); status != "" {
 		q = q.Where("booking_status = ?", status)
 	}
@@ -132,7 +128,10 @@ func CreateBooking(c *gin.Context) {
 	bookingNo := fmt.Sprintf("BK-%02d%02d-%04d", now.Year()%100, now.Month(), count+1)
 
 	var salesID *uuid.UUID
-	if req.SalesID != "" {
+	if currentRole(c) == "sales" {
+		uid := currentUserID(c)
+		salesID = &uid
+	} else if req.SalesID != "" {
 		sid, _ := uuid.Parse(req.SalesID)
 		salesID = &sid
 	}
@@ -205,6 +204,10 @@ func UpdateBooking(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Booking not found"})
 		return
 	}
+	if !ownsSalesRecord(c, booking.SalesID) {
+		forbidden(c)
+		return
+	}
 
 	var req UpdateBookingRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -237,7 +240,7 @@ func UpdateBooking(c *gin.Context) {
 		t, _ := time.Parse("2006-01-02", *req.DepartureDate)
 		updates["departure_date"] = t
 	}
-	if req.SalesID != nil {
+	if req.SalesID != nil && currentRole(c) == "admin" {
 		if *req.SalesID == "" {
 			updates["sales_id"] = nil
 		} else {
@@ -287,6 +290,9 @@ func UpdateBooking(c *gin.Context) {
 
 func DeleteBooking(c *gin.Context) {
 	id := c.Param("id")
+	if _, ok := fetchOwnedBooking(c, id); !ok {
+		return
+	}
 	database.DB.Delete(&models.Booking{}, "id = ?", id)
 	c.JSON(http.StatusOK, gin.H{"message": "Booking deleted"})
 }
@@ -301,9 +307,8 @@ type AddPaymentRequest struct {
 
 func AddPayment(c *gin.Context) {
 	bookingID := c.Param("id")
-	var booking models.Booking
-	if err := database.DB.First(&booking, "id = ?", bookingID).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Booking not found"})
+	booking, ok := fetchOwnedBooking(c, bookingID)
+	if !ok {
 		return
 	}
 
@@ -346,6 +351,9 @@ func AddPayment(c *gin.Context) {
 
 func GetPayments(c *gin.Context) {
 	bookingID := c.Param("id")
+	if _, ok := fetchOwnedBooking(c, bookingID); !ok {
+		return
+	}
 	var payments []models.BookingPayment
 	database.DB.Where("booking_id = ?", bookingID).Order("payment_no").Find(&payments)
 	c.JSON(http.StatusOK, payments)
@@ -355,6 +363,11 @@ func DeletePayment(c *gin.Context) {
 	bookingID := c.Param("id")
 	paymentID := c.Param("paymentId")
 
+	booking, ok := fetchOwnedBooking(c, bookingID)
+	if !ok {
+		return
+	}
+
 	var payment models.BookingPayment
 	if err := database.DB.Where("id = ? AND booking_id = ?", paymentID, bookingID).First(&payment).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Payment not found"})
@@ -362,14 +375,11 @@ func DeletePayment(c *gin.Context) {
 	}
 	database.DB.Delete(&payment)
 
-	var booking models.Booking
-	if err := database.DB.First(&booking, "id = ?", bookingID).Error; err == nil {
-		newPaid := booking.TotalPaid - payment.Amount
-		database.DB.Model(&booking).Updates(map[string]interface{}{
-			"total_paid":        newPaid,
-			"remaining_payment": booking.TotalPrice - newPaid,
-		})
-	}
+	newPaid := booking.TotalPaid - payment.Amount
+	database.DB.Model(&booking).Updates(map[string]interface{}{
+		"total_paid":        newPaid,
+		"remaining_payment": booking.TotalPrice - newPaid,
+	})
 
 	c.JSON(http.StatusOK, gin.H{"message": "Payment deleted"})
 }

@@ -23,9 +23,7 @@ func chatFilters(c *gin.Context) *gorm.DB {
 	q := database.DB.
 		Where("EXISTS (SELECT 1 FROM chats WHERE chats.lead_id = leads.id)")
 
-	if salesID := c.Query("sales_id"); salesID != "" {
-		q = q.Where("sales_id = ?", salesID)
-	}
+	q = scopeSalesFilter(c, q)
 	if statusID := c.Query("status_id"); statusID != "" {
 		q = q.Where("status_id = ?", statusID)
 	}
@@ -149,17 +147,41 @@ func GetChatSummary(c *gin.Context) {
 	})
 }
 
+// fetchOwnedLead loads a lead by id and writes a 404/403 response (returning
+// ok=false) if it doesn't exist or the requester isn't allowed to touch it.
+func fetchOwnedLead(c *gin.Context, id string) (models.Lead, bool) {
+	var lead models.Lead
+	if err := database.DB.First(&lead, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Lead not found"})
+		return lead, false
+	}
+	if !ownsSalesRecord(c, lead.SalesID) {
+		forbidden(c)
+		return lead, false
+	}
+	return lead, true
+}
+
 func ArchiveLead(c *gin.Context) {
+	if _, ok := fetchOwnedLead(c, c.Param("id")); !ok {
+		return
+	}
 	database.DB.Model(&models.Lead{}).Where("id = ?", c.Param("id")).Update("is_archived", true)
 	c.JSON(http.StatusOK, gin.H{"message": "Lead archived"})
 }
 
 func UnarchiveLead(c *gin.Context) {
+	if _, ok := fetchOwnedLead(c, c.Param("id")); !ok {
+		return
+	}
 	database.DB.Model(&models.Lead{}).Where("id = ?", c.Param("id")).Update("is_archived", false)
 	c.JSON(http.StatusOK, gin.H{"message": "Lead unarchived"})
 }
 
 func GetLeadActivities(c *gin.Context) {
+	if _, ok := fetchOwnedLead(c, c.Param("id")); !ok {
+		return
+	}
 	var activities []models.LeadActivity
 	database.DB.Preload("Creator").Where("lead_id = ?", c.Param("id")).Order("created_at DESC").Find(&activities)
 	c.JSON(http.StatusOK, activities)
@@ -174,9 +196,8 @@ type CreateLeadActivityRequest struct {
 // backing store for the Chat tab's "Catatan Internal" reply mode (team-only
 // notes that are never sent to WhatsApp).
 func CreateLeadActivity(c *gin.Context) {
-	var lead models.Lead
-	if err := database.DB.First(&lead, "id = ?", c.Param("id")).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Lead not found"})
+	lead, ok := fetchOwnedLead(c, c.Param("id"))
+	if !ok {
 		return
 	}
 

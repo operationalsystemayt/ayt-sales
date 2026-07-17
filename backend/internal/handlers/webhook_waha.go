@@ -5,8 +5,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ayt-sales/backend/internal/database"
+	"github.com/ayt-sales/backend/internal/models"
 	"github.com/ayt-sales/backend/internal/whatsapp"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 type WahaWebhookPayload struct {
@@ -38,7 +41,7 @@ type WahaWebhookPayload struct {
 // sender isn't a saved contact), we fall back to the group id (or the raw lid
 // on a direct chat) so the conversation is still tracked as a distinct thread,
 // just without a real phone number attached.
-func resolveSenderPhone(from, participant string) string {
+func resolveSenderPhone(from, participant, session string) string {
 	candidate := from
 	if strings.HasSuffix(from, "@g.us") && participant != "" {
 		candidate = participant
@@ -48,12 +51,27 @@ func resolveSenderPhone(from, participant string) string {
 		return strings.TrimSuffix(candidate, "@c.us")
 	}
 	if strings.HasSuffix(candidate, "@lid") {
-		if real, ok := whatsapp.ResolveLid(candidate); ok {
+		if real, ok := whatsapp.ResolveLid(session, candidate); ok {
 			return real
 		}
 	}
 
 	return strings.TrimSuffix(from, "@c.us")
+}
+
+// resolveSalesBySession finds the active sales rep whose registered WhatsApp
+// number/session matches the one this webhook fired on, so a newly-created
+// lead can be auto-assigned to them. Returns nil if no sales rep is mapped to
+// this session (lead stays unassigned until an admin picks it up).
+func resolveSalesBySession(session string) *uuid.UUID {
+	if session == "" {
+		return nil
+	}
+	var user models.User
+	if err := database.DB.Where("waha_session = ? AND role = 'sales' AND is_active = true", session).First(&user).Error; err != nil {
+		return nil
+	}
+	return &user.ID
 }
 
 // WahaWebhook receives WAHA's "message" event and feeds it into the same
@@ -71,7 +89,7 @@ func WahaWebhook(c *gin.Context) {
 		return
 	}
 
-	phone := resolveSenderPhone(payload.Payload.From, payload.Payload.Participant)
+	phone := resolveSenderPhone(payload.Payload.From, payload.Payload.Participant, payload.Session)
 	chatTime := time.Now()
 	if payload.Payload.Timestamp > 0 {
 		chatTime = time.Unix(payload.Payload.Timestamp, 0)
@@ -82,7 +100,8 @@ func WahaWebhook(c *gin.Context) {
 		providerMessageID = &payload.Payload.ID
 	}
 
-	ingestInboundMessage(phone, payload.Payload.Data.NotifyName, payload.Payload.Body, chatTime, "Organik", providerMessageID)
+	salesID := resolveSalesBySession(payload.Session)
+	ingestInboundMessage(phone, payload.Payload.Data.NotifyName, payload.Payload.Body, chatTime, "Organik", providerMessageID, salesID)
 
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }

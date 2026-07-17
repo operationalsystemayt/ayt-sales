@@ -1,9 +1,9 @@
 import { useEffect, useState, useCallback } from 'react'
-import { UserPlus } from 'lucide-react'
+import { UserPlus, Pencil } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
 import Avatar from '../components/ui/Avatar'
 import { useAuthStore } from '../store/auth'
-import { getSettings, updateSettings, getUsers, createUser } from '../services/api'
+import { getSettings, updateSettings, getUsers, createUser, updateUser } from '../services/api'
 import type { User } from '../types'
 
 const ROLE_LABELS: Record<string, string> = { admin: 'Admin', sales: 'Sales', viewer: 'Viewer' }
@@ -22,8 +22,10 @@ export default function Settings() {
 
   const [users, setUsers] = useState<User[]>([])
   const [showAddUser, setShowAddUser] = useState(false)
-  const [userForm, setUserForm] = useState({ full_name: '', email: '', password: '', role: 'sales' })
+  const [userForm, setUserForm] = useState({ full_name: '', email: '', password: '', role: 'sales', waha_session: '' })
   const [userError, setUserError] = useState('')
+  const [editingUserId, setEditingUserId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState({ full_name: '', phone: '', role: 'sales', waha_session: '' })
 
   const loadUsers = useCallback(async () => {
     if (!isAdmin) return
@@ -68,10 +70,27 @@ export default function Settings() {
     try {
       await createUser(userForm)
       setShowAddUser(false)
-      setUserForm({ full_name: '', email: '', password: '', role: 'sales' })
+      setUserForm({ full_name: '', email: '', password: '', role: 'sales', waha_session: '' })
       loadUsers()
     } catch (err: any) {
       setUserError(err.response?.data?.error ?? 'Gagal menambahkan user')
+    }
+  }
+
+  const startEditUser = (u: User) => {
+    setEditingUserId(u.id)
+    setEditForm({ full_name: u.full_name, phone: u.phone ?? '', role: u.role, waha_session: u.waha_session ?? '' })
+  }
+
+  const handleSaveEditUser = async () => {
+    if (!editingUserId) return
+    setUserError('')
+    try {
+      await updateUser(editingUserId, editForm)
+      setEditingUserId(null)
+      loadUsers()
+    } catch (err: any) {
+      setUserError(err.response?.data?.error ?? 'Gagal menyimpan perubahan user')
     }
   }
 
@@ -195,6 +214,9 @@ export default function Settings() {
                 <option value="sales">Sales</option>
                 <option value="viewer">Viewer</option>
               </select>
+              <input placeholder="WAHA session (nomor WhatsApp, mis. 62821)" value={userForm.waha_session}
+                onChange={(e) => setUserForm({ ...userForm, waha_session: e.target.value })}
+                className="border border-gray-200 rounded-lg px-3 py-2 w-full text-sm focus:outline-none focus:border-blue-400" />
               <button onClick={handleAddUser} className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700">
                 Simpan User
               </button>
@@ -203,13 +225,48 @@ export default function Settings() {
 
           <div className="space-y-2">
             {users.map((u) => (
-              <div key={u.id} className="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0">
-                <Avatar name={u.full_name} src={u.avatar} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-800 truncate">{u.full_name}</p>
-                  <p className="text-xs text-gray-400 truncate">{u.email}</p>
-                </div>
-                <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{ROLE_LABELS[u.role] ?? u.role}</span>
+              <div key={u.id} className="py-2 border-b border-gray-50 last:border-0">
+                {editingUserId === u.id ? (
+                  <div className="space-y-2 py-1">
+                    <input placeholder="Nama lengkap" value={editForm.full_name}
+                      onChange={(e) => setEditForm({ ...editForm, full_name: e.target.value })}
+                      className="border border-gray-200 rounded-lg px-3 py-1.5 w-full text-sm focus:outline-none focus:border-blue-400" />
+                    <input placeholder="Nomor telepon" value={editForm.phone}
+                      onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                      className="border border-gray-200 rounded-lg px-3 py-1.5 w-full text-sm focus:outline-none focus:border-blue-400" />
+                    <select value={editForm.role} onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
+                      className="border border-gray-200 rounded-lg px-3 py-1.5 w-full text-sm focus:outline-none focus:border-blue-400">
+                      <option value="admin">Admin</option>
+                      <option value="sales">Sales</option>
+                      <option value="viewer">Viewer</option>
+                    </select>
+                    <input placeholder="WAHA session (nomor WhatsApp, mis. 62821)" value={editForm.waha_session}
+                      onChange={(e) => setEditForm({ ...editForm, waha_session: e.target.value })}
+                      className="border border-gray-200 rounded-lg px-3 py-1.5 w-full text-sm focus:outline-none focus:border-blue-400" />
+                    <div className="flex gap-2">
+                      <button onClick={handleSaveEditUser} className="flex-1 bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-blue-700">
+                        Simpan
+                      </button>
+                      <button onClick={() => setEditingUserId(null)} className="flex-1 bg-gray-100 text-gray-600 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-gray-200">
+                        Batal
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <Avatar name={u.full_name} src={u.avatar} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-800 truncate">{u.full_name}</p>
+                      <p className="text-xs text-gray-400 truncate">
+                        {u.email}{u.waha_session ? ` · WA: ${u.waha_session}` : ''}
+                      </p>
+                    </div>
+                    <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{ROLE_LABELS[u.role] ?? u.role}</span>
+                    <button onClick={() => startEditUser(u)} className="text-gray-400 hover:text-gray-700 p-1">
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
             {users.length === 0 && <p className="text-xs text-gray-400 text-center py-4">Belum ada user</p>}

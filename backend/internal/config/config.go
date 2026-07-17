@@ -21,6 +21,8 @@ type Config struct {
 	WahaBaseURL       string
 	WahaAPIKey        string
 	WahaSession       string
+	MetaAdAccountID   string
+	MetaAccessToken   string
 }
 
 func Load() *Config {
@@ -41,6 +43,8 @@ func Load() *Config {
 		WahaBaseURL:       getEnv("WAHA_BASE_URL", "http://localhost:3000"),
 		WahaAPIKey:        getEnv("WAHA_API_KEY", ""),
 		WahaSession:       getEnv("WAHA_SESSION", "default"),
+		MetaAdAccountID:   getEnv("META_AD_ACCOUNT_ID", ""),
+		MetaAccessToken:   getEnv("META_ACCESS_TOKEN", ""),
 	}
 }
 

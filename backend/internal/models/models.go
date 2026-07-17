@@ -15,9 +15,15 @@ type User struct {
 	PasswordHash string    `gorm:"type:varchar(255);not null" json:"-"`
 	Role         string    `gorm:"type:varchar(20);default:'sales'" json:"role"`
 	Avatar       string    `gorm:"type:text" json:"avatar"`
-	IsActive     bool      `gorm:"default:true" json:"is_active"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	// WahaSession is the WAHA session name bound to this sales rep's WhatsApp
+	// number (e.g. one session per registered number). Empty means this user
+	// isn't mapped to a WAHA session — inbound messages on unmapped sessions
+	// and outbound sends for leads with no session-mapped sales fall back to
+	// the default session (config.WahaSession).
+	WahaSession string    `gorm:"type:varchar(100)" json:"waha_session"`
+	IsActive    bool      `gorm:"default:true" json:"is_active"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type MasterSource struct {
@@ -133,6 +139,21 @@ type Lead struct {
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+// AdInsight is a daily aggregate synced from the Meta Marketing API Insights
+// endpoint (one row per calendar day, upserted on Date). Conversations counts
+// the "onsite_conversion.messaging_conversation_started_7d" action — Meta's
+// proxy for a lead on Click-to-WhatsApp campaigns.
+type AdInsight struct {
+	ID            uint      `gorm:"primaryKey;autoIncrement" json:"id"`
+	Date          time.Time `gorm:"type:date;uniqueIndex;not null" json:"date"`
+	Spend         float64   `gorm:"type:numeric(15,2);default:0" json:"spend"`
+	Impressions   int64     `gorm:"default:0" json:"impressions"`
+	Clicks        int64     `gorm:"default:0" json:"clicks"`
+	Conversations int64     `gorm:"default:0" json:"conversations"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type Booking struct {

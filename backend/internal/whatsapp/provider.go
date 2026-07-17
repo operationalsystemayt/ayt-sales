@@ -10,16 +10,21 @@ import (
 
 // Provider is the abstraction that lets the app send/read WhatsApp messages
 // through whichever backend (WABA or WAHA) is currently selected in Settings.
+//
+// session identifies which WAHA session (registered WhatsApp number) a call
+// should go through — resolved by the caller from the lead's assigned sales
+// rep (models.User.WahaSession). WABA implementations ignore it: this scope
+// only supports multiple numbers/sessions on WAHA.
 type Provider interface {
-	SendText(phone, text string) error
-	MarkAsRead(phone string, lastInboundMessageID *string) error
+	SendText(session, phone, text string) error
+	MarkAsRead(session, phone string, lastInboundMessageID *string) error
 }
 
 // HistorySyncer is an optional capability — only WAHA supports pulling past
 // messages (Meta's Cloud API has no equivalent bulk-history endpoint).
 // Handlers type-assert whatsapp.Current() against this interface.
 type HistorySyncer interface {
-	FetchHistory(phone string, limit int) ([]HistoryMessage, error)
+	FetchHistory(session, phone string, limit int) ([]HistoryMessage, error)
 }
 
 type HistoryMessage struct {

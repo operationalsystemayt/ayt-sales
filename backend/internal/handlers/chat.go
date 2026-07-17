@@ -20,10 +20,23 @@ func GetLead(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Lead not found"})
 		return
 	}
+	if !ownsSalesRecord(c, lead.SalesID) {
+		forbidden(c)
+		return
+	}
 	c.JSON(http.StatusOK, lead)
 }
 
 func GetLeadChats(c *gin.Context) {
+	var lead models.Lead
+	if err := database.DB.First(&lead, "id = ?", c.Param("id")).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Lead not found"})
+		return
+	}
+	if !ownsSalesRecord(c, lead.SalesID) {
+		forbidden(c)
+		return
+	}
 	var chats []models.Chat
 	database.DB.Where("lead_id = ?", c.Param("id")).Order("chat_timestamp ASC").Find(&chats)
 	c.JSON(http.StatusOK, chats)
@@ -36,8 +49,12 @@ type CreateChatRequest struct {
 
 func CreateLeadChat(c *gin.Context) {
 	var lead models.Lead
-	if err := database.DB.Preload("Customer").First(&lead, "id = ?", c.Param("id")).Error; err != nil {
+	if err := database.DB.Preload("Customer").Preload("Sales").First(&lead, "id = ?", c.Param("id")).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Lead not found"})
+		return
+	}
+	if !ownsSalesRecord(c, lead.SalesID) {
+		forbidden(c)
 		return
 	}
 
@@ -63,7 +80,11 @@ func CreateLeadChat(c *gin.Context) {
 
 	sendError := ""
 	if req.Direction == "out" && lead.Customer != nil {
-		if err := whatsapp.Current().SendText(lead.Customer.Phone, req.Body); err != nil {
+		session := ""
+		if lead.Sales != nil {
+			session = lead.Sales.WahaSession
+		}
+		if err := whatsapp.Current().SendText(session, lead.Customer.Phone, req.Body); err != nil {
 			log.Println("whatsapp send failed:", err)
 			sendError = err.Error()
 		}
@@ -79,8 +100,12 @@ func CreateLeadChat(c *gin.Context) {
 // list uses to decide whether to show an unread pill.
 func MarkChatRead(c *gin.Context) {
 	var lead models.Lead
-	if err := database.DB.Preload("Customer").First(&lead, "id = ?", c.Param("id")).Error; err != nil {
+	if err := database.DB.Preload("Customer").Preload("Sales").First(&lead, "id = ?", c.Param("id")).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Lead not found"})
+		return
+	}
+	if !ownsSalesRecord(c, lead.SalesID) {
+		forbidden(c)
 		return
 	}
 
@@ -89,7 +114,11 @@ func MarkChatRead(c *gin.Context) {
 	var lastIn models.Chat
 	if err := database.DB.Where("lead_id = ? AND direction = ?", lead.ID, "in").
 		Order("chat_timestamp DESC").First(&lastIn).Error; err == nil {
-		if err := whatsapp.Current().MarkAsRead(lead.Customer.Phone, lastIn.ProviderMessageID); err != nil {
+		session := ""
+		if lead.Sales != nil {
+			session = lead.Sales.WahaSession
+		}
+		if err := whatsapp.Current().MarkAsRead(session, lead.Customer.Phone, lastIn.ProviderMessageID); err != nil {
 			log.Println("whatsapp mark-as-read failed:", err)
 		}
 	}
@@ -102,8 +131,12 @@ func MarkChatRead(c *gin.Context) {
 // to backfill conversations that started before our webhook was wired up.
 func SyncLeadChats(c *gin.Context) {
 	var lead models.Lead
-	if err := database.DB.Preload("Customer").First(&lead, "id = ?", c.Param("id")).Error; err != nil {
+	if err := database.DB.Preload("Customer").Preload("Sales").First(&lead, "id = ?", c.Param("id")).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Lead not found"})
+		return
+	}
+	if !ownsSalesRecord(c, lead.SalesID) {
+		forbidden(c)
 		return
 	}
 
@@ -113,7 +146,11 @@ func SyncLeadChats(c *gin.Context) {
 		return
 	}
 
-	messages, err := syncer.FetchHistory(lead.Customer.Phone, 100)
+	session := ""
+	if lead.Sales != nil {
+		session = lead.Sales.WahaSession
+	}
+	messages, err := syncer.FetchHistory(session, lead.Customer.Phone, 100)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return

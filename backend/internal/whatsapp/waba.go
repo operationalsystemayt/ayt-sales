@@ -48,7 +48,7 @@ func wabaRequest(body any) error {
 	return nil
 }
 
-func (p *WabaProvider) SendText(phone, text string) error {
+func (p *WabaProvider) SendText(_, phone, text string) error {
 	return wabaRequest(map[string]any{
 		"messaging_product": "whatsapp",
 		"to":                phone,
@@ -61,7 +61,7 @@ func (p *WabaProvider) SendText(phone, text string) error {
 // API has no per-chat "mark as seen" like WAHA does. If we don't have one on
 // record (e.g. an older Chat row from before this field existed), log and no-op
 // rather than failing the caller.
-func (p *WabaProvider) MarkAsRead(_ string, lastInboundMessageID *string) error {
+func (p *WabaProvider) MarkAsRead(_, _ string, lastInboundMessageID *string) error {
 	if lastInboundMessageID == nil || *lastInboundMessageID == "" {
 		log.Println("waba: no provider_message_id on record, skipping mark-as-read")
 		return nil

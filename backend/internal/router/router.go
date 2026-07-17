@@ -62,6 +62,7 @@ func Setup(cfg *config.Config) *gin.Engine {
 		// Users / Sales
 		auth.GET("/users", handlers.GetUsers)
 		auth.POST("/users", middleware.RequireRole("admin"), handlers.CreateUser)
+		auth.PUT("/users/:id", middleware.RequireRole("admin"), handlers.UpdateUser)
 
 		// Master data
 		auth.GET("/master/sources", handlers.GetMasterSources)
@@ -125,6 +126,7 @@ func Setup(cfg *config.Config) *gin.Engine {
 		auth.GET("/dashboard/top-products", handlers.GetDashboardTopProducts)
 		auth.GET("/dashboard/chart", handlers.GetDashboardChart)
 		auth.GET("/dashboard/top-trips", handlers.GetTopTrips)
+		auth.POST("/dashboard/ads/sync", middleware.RequireRole("admin"), handlers.SyncAdInsights)
 
 		// Reports
 		auth.GET("/reports/sales", handlers.GetReportSales)

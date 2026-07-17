@@ -5,6 +5,7 @@ import (
 
 	"github.com/ayt-sales/backend/internal/config"
 	"github.com/ayt-sales/backend/internal/database"
+	"github.com/ayt-sales/backend/internal/metaads"
 	"github.com/ayt-sales/backend/internal/middleware"
 	"github.com/ayt-sales/backend/internal/router"
 	"github.com/ayt-sales/backend/internal/whatsapp"
@@ -14,6 +15,7 @@ func main() {
 	cfg := config.Load()
 	middleware.JWTSecret = cfg.JWTSecret
 	whatsapp.Init(cfg)
+	metaads.Init(cfg)
 
 	database.Connect(cfg)
 

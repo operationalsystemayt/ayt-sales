@@ -18,6 +18,16 @@ func wahaChatID(phone string) string {
 	return phone + "@c.us"
 }
 
+// resolveSession falls back to the configured default session when the caller
+// has no specific session to use (e.g. the lead's sales rep has no
+// WahaSession mapped, or isn't assigned to anyone yet).
+func resolveSession(session string) string {
+	if session != "" {
+		return session
+	}
+	return cfg.WahaSession
+}
+
 func wahaRequest(method, path string, body any) ([]byte, error) {
 	if cfg == nil || cfg.WahaBaseURL == "" {
 		return nil, fmt.Errorf("WAHA_BASE_URL not configured")
@@ -60,23 +70,24 @@ func wahaRequest(method, path string, body any) ([]byte, error) {
 // rather than firing the message immediately — and enforces a basic
 // per-contact rate limit before any of that.
 // https://waha.devlike.pro/docs/overview/how-to-avoid-blocking/
-func (p *WahaProvider) SendText(phone, text string) error {
+func (p *WahaProvider) SendText(session, phone, text string) error {
 	if !wahaRateLimiter.Allow(phone) {
 		return rateLimitError(phone)
 	}
 
+	sess := resolveSession(session)
 	chatID := wahaChatID(phone)
-	session := map[string]string{"session": cfg.WahaSession, "chatId": chatID}
+	body := map[string]string{"session": sess, "chatId": chatID}
 
 	// Best-effort human-like sequence — a failure at any of these steps still
 	// falls through to attempting the actual send below.
-	wahaRequest("POST", "/api/sendSeen", session)
-	wahaRequest("POST", "/api/startTyping", session)
+	wahaRequest("POST", "/api/sendSeen", body)
+	wahaRequest("POST", "/api/startTyping", body)
 	time.Sleep(typingDuration(text))
-	wahaRequest("POST", "/api/stopTyping", session)
+	wahaRequest("POST", "/api/stopTyping", body)
 
 	_, err := wahaRequest("POST", "/api/sendText", map[string]string{
-		"session": cfg.WahaSession,
+		"session": sess,
 		"chatId":  chatID,
 		"text":    text,
 	})
@@ -97,9 +108,9 @@ func typingDuration(text string) time.Duration {
 	return d
 }
 
-func (p *WahaProvider) MarkAsRead(phone string, _ *string) error {
+func (p *WahaProvider) MarkAsRead(session, phone string, _ *string) error {
 	_, err := wahaRequest("POST", "/api/sendSeen", map[string]string{
-		"session": cfg.WahaSession,
+		"session": resolveSession(session),
 		"chatId":  wahaChatID(phone),
 	})
 	return err
@@ -123,9 +134,9 @@ type wahaLidResponse struct {
 // ok=false if WAHA has no mapping on file — e.g. the sender isn't in the
 // connected account's contacts, which is expected for a cold inbound lead.
 // https://waha.devlike.pro/docs/how-to/contacts/
-func ResolveLid(lid string) (phone string, ok bool) {
+func ResolveLid(session, lid string) (phone string, ok bool) {
 	lid = strings.TrimSuffix(lid, "@lid")
-	body, err := wahaRequest("GET", fmt.Sprintf("/api/%s/lids/%s", cfg.WahaSession, lid), nil)
+	body, err := wahaRequest("GET", fmt.Sprintf("/api/%s/lids/%s", resolveSession(session), lid), nil)
 	if err != nil {
 		return "", false
 	}
@@ -136,8 +147,8 @@ func ResolveLid(lid string) (phone string, ok bool) {
 	return strings.TrimSuffix(res.PN, "@c.us"), true
 }
 
-func (p *WahaProvider) FetchHistory(phone string, limit int) ([]HistoryMessage, error) {
-	path := fmt.Sprintf("/api/%s/chats/%s/messages?limit=%d", cfg.WahaSession, wahaChatID(phone), limit)
+func (p *WahaProvider) FetchHistory(session, phone string, limit int) ([]HistoryMessage, error) {
+	path := fmt.Sprintf("/api/%s/chats/%s/messages?limit=%d", resolveSession(session), wahaChatID(phone), limit)
 	body, err := wahaRequest("GET", path, nil)
 	if err != nil {
 		return nil, err

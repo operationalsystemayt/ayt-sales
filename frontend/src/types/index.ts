@@ -6,6 +6,7 @@ export interface User {
   role: 'admin' | 'sales' | 'viewer'
   avatar?: string
   is_active?: boolean
+  waha_session?: string
 }
 
 export interface MasterSource { id: number; name: string }
@@ -235,6 +236,8 @@ export interface ChartRow {
   leads: number
   closing: number
   revenue: number
+  ad_spend: number
+  ads_conversations: number
 }
 
 export interface BookingSummary {

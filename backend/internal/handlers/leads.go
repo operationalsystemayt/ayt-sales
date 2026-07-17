@@ -15,9 +15,7 @@ import (
 // leadListFilters applies the filter set shared by GetLeads and GetLeadsSummary, so the
 // summary cards always reflect exactly the rows currently visible in the table.
 func leadListFilters(c *gin.Context, q *gorm.DB) *gorm.DB {
-	if salesID := c.Query("sales_id"); salesID != "" {
-		q = q.Where("sales_id = ?", salesID)
-	}
+	q = scopeSalesFilter(c, q)
 	if statusID := c.Query("status_id"); statusID != "" {
 		q = q.Where("status_id = ?", statusID)
 	}
@@ -224,7 +222,10 @@ func CreateLead(c *gin.Context) {
 	}
 
 	var salesID *uuid.UUID
-	if req.SalesID != "" {
+	if currentRole(c) == "sales" {
+		uid := currentUserID(c)
+		salesID = &uid
+	} else if req.SalesID != "" {
 		sid, err := uuid.Parse(req.SalesID)
 		if err == nil {
 			salesID = &sid
@@ -310,6 +311,10 @@ func UpdateLead(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Lead not found"})
 		return
 	}
+	if !ownsSalesRecord(c, lead.SalesID) {
+		forbidden(c)
+		return
+	}
 
 	var req UpdateLeadRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -362,7 +367,9 @@ func UpdateLead(c *gin.Context) {
 
 	updates := map[string]interface{}{}
 
-	if req.SalesID != nil {
+	// Reassigning a lead to a different sales rep is admin-only — a sales user
+	// can edit their own lead's other fields but not hand it off to someone else.
+	if req.SalesID != nil && currentRole(c) == "admin" {
 		if *req.SalesID == "" {
 			updates["sales_id"] = nil
 		} else {
@@ -451,6 +458,11 @@ func BulkUpdateLeads(c *gin.Context) {
 		return
 	}
 
+	q := database.DB.Model(&models.Lead{}).Where("id IN ?", req.IDs)
+	if currentRole(c) == "sales" {
+		q = q.Where("sales_id = ?", currentUserID(c))
+	}
+
 	if req.Field == "deal_date" {
 		dateStr, ok := req.Value.(string)
 		if !ok || dateStr == "" {
@@ -462,11 +474,9 @@ func BulkUpdateLeads(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Format tanggal tidak valid"})
 			return
 		}
-		database.DB.Model(&models.Lead{}).Where("id IN ?", req.IDs).Update("deal_date", t)
+		q.Update("deal_date", t)
 	} else {
-		database.DB.Model(&models.Lead{}).
-			Where("id IN ?", req.IDs).
-			Update(req.Field, req.Value)
+		q.Update(req.Field, req.Value)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"updated": len(req.IDs)})
@@ -474,6 +484,15 @@ func BulkUpdateLeads(c *gin.Context) {
 
 func DeleteLead(c *gin.Context) {
 	id := c.Param("id")
+	var lead models.Lead
+	if err := database.DB.First(&lead, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Lead not found"})
+		return
+	}
+	if !ownsSalesRecord(c, lead.SalesID) {
+		forbidden(c)
+		return
+	}
 	database.DB.Delete(&models.Lead{}, "id = ?", id)
 	c.JSON(http.StatusOK, gin.H{"message": "Lead deleted"})
 }
@@ -493,6 +512,10 @@ func ConvertLeadToBooking(c *gin.Context) {
 	var lead models.Lead
 	if err := database.DB.Preload("Customer").First(&lead, "id = ?", leadID).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Lead not found"})
+		return
+	}
+	if !ownsSalesRecord(c, lead.SalesID) {
+		forbidden(c)
 		return
 	}
 	if lead.IsConverted {

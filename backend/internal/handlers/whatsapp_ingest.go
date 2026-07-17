@@ -27,7 +27,10 @@ func nextLeadNo() string {
 // WhatsApp webhook (WABA, WAHA, ...): find-or-create the Customer, find-or-create
 // the customer's currently-open Lead, and record the Chat row. sourceName and
 // providerMessageID are supplied by each provider-specific webhook parser.
-func ingestInboundMessage(phone, contactName, body string, chatTime time.Time, sourceName string, providerMessageID *string) {
+// salesID (optional) assigns a newly-created lead to the sales rep whose
+// registered WhatsApp number/session received this message; an already-open
+// lead keeps whatever sales_id it has (reassignment is admin-only, via UpdateLead).
+func ingestInboundMessage(phone, contactName, body string, chatTime time.Time, sourceName string, providerMessageID *string, salesID *uuid.UUID) {
 	var customer models.Customer
 	if err := database.DB.Where("phone = ?", phone).First(&customer).Error; err != nil {
 		customer = models.Customer{ID: uuid.New(), FullName: contactName, Phone: phone}
@@ -60,6 +63,7 @@ func ingestInboundMessage(phone, contactName, body string, chatTime time.Time, s
 		lead = models.Lead{
 			ID:           uuid.New(),
 			CustomerID:   customer.ID,
+			SalesID:      salesID,
 			LeadNo:       nextLeadNo(),
 			SourceID:     &source.ID,
 			InputID:      &input.ID,

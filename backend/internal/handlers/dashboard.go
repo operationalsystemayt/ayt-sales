@@ -5,8 +5,10 @@ import (
 	"time"
 
 	"github.com/ayt-sales/backend/internal/database"
+	"github.com/ayt-sales/backend/internal/metaads"
 	"github.com/ayt-sales/backend/internal/models"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm/clause"
 )
 
 func GetDashboardSummary(c *gin.Context) {
@@ -150,26 +152,69 @@ func GetDashboardChart(c *gin.Context) {
 	}
 
 	type ChartRow struct {
-		Day     int     `json:"day"`
-		Leads   int64   `json:"leads"`
-		Closing int64   `json:"closing"`
-		Revenue float64 `json:"revenue"`
+		Day              int     `json:"day"`
+		Leads            int64   `json:"leads"`
+		Closing          int64   `json:"closing"`
+		Revenue          float64 `json:"revenue"`
+		AdSpend          float64 `json:"ad_spend"`
+		AdsConversations int64   `json:"ads_conversations"`
 	}
 
 	// Leads = sum of pax across leads received that day (a lead with pax unset/0 counts
-	// as 1 person). Closing = sum of pax across bookings made that day.
+	// as 1 person). Closing = sum of pax across bookings made that day. AdSpend/
+	// AdsConversations come from ad_insights, synced separately from the Meta
+	// Marketing API (see SyncAdInsights) — 0 for any day not yet synced.
 	rows := make([]ChartRow, 0)
 	database.DB.Raw(`
 		SELECT
 			EXTRACT(DAY FROM gs.day)::int as day,
 			COALESCE((SELECT SUM(GREATEST(COALESCE(l.pax, 0), 1)) FROM leads l WHERE DATE(l.date_received) = gs.day AND l.deleted_at IS NULL), 0) as leads,
 			COALESCE((SELECT SUM(b.pax) FROM bookings b WHERE DATE(b.booking_date) = gs.day AND b.deleted_at IS NULL), 0) as closing,
-			COALESCE((SELECT SUM(b2.total_paid) FROM bookings b2 WHERE DATE(b2.booking_date) = gs.day AND b2.deleted_at IS NULL), 0) as revenue
+			COALESCE((SELECT SUM(b2.total_paid) FROM bookings b2 WHERE DATE(b2.booking_date) = gs.day AND b2.deleted_at IS NULL), 0) as revenue,
+			COALESCE((SELECT ai.spend FROM ad_insights ai WHERE ai.date = gs.day), 0) as ad_spend,
+			COALESCE((SELECT ai.conversations FROM ad_insights ai WHERE ai.date = gs.day), 0) as ads_conversations
 		FROM generate_series(?::date, ?::date, '1 day'::interval) AS gs(day)
 		ORDER BY gs.day
 	`, dateFrom, dateTo).Scan(&rows)
 
 	c.JSON(http.StatusOK, rows)
+}
+
+// SyncAdInsights pulls daily spend/conversions from the Meta Marketing API
+// for [date_from, date_to] and upserts them into ad_insights, keyed by date.
+func SyncAdInsights(c *gin.Context) {
+	dateFrom := c.Query("date_from")
+	dateTo := c.Query("date_to")
+	if dateFrom == "" || dateTo == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "date_from and date_to are required"})
+		return
+	}
+
+	insights, err := metaads.FetchDailyInsights(dateFrom, dateTo)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+
+	rows := make([]models.AdInsight, 0, len(insights))
+	for _, ins := range insights {
+		rows = append(rows, models.AdInsight{
+			Date:          ins.Date,
+			Spend:         ins.Spend,
+			Impressions:   ins.Impressions,
+			Clicks:        ins.Clicks,
+			Conversations: ins.Conversations,
+		})
+	}
+
+	if len(rows) > 0 {
+		database.DB.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "date"}},
+			DoUpdates: clause.AssignmentColumns([]string{"spend", "impressions", "clicks", "conversations", "updated_at"}),
+		}).Create(&rows)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"synced": len(rows)})
 }
 
 func GetTopTrips(c *gin.Context) {

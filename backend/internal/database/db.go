@@ -54,6 +54,7 @@ func migrate(db *gorm.DB) {
 		&models.Setting{},
 		&models.Booking{},
 		&models.BookingPayment{},
+		&models.AdInsight{},
 	)
 	if err != nil {
 		log.Fatal("Migration failed:", err)

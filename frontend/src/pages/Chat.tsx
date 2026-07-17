@@ -14,6 +14,7 @@ import {
   saveCustomer, getCustomerSummary, getUsers, getMasterStatuses, getMasterSources,
   updateLead, deleteLead,
 } from '../services/api'
+import { useAuthStore } from '../store/auth'
 import type {
   ChatInboxItem, ChatSummary, Chat as ChatMsg, User, MasterStatus, MasterSource,
   LeadActivity, CustomerSummary,
@@ -50,6 +51,8 @@ function StatCard({ label, value, sub, color }: { label: string; value: number |
 export default function Chat() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
+  const { user: currentUser } = useAuthStore()
+  const isSales = currentUser?.role === 'sales'
 
   const [items, setItems] = useState<ChatInboxItem[]>([])
   const [summary, setSummary] = useState<ChatSummary | null>(null)
@@ -269,10 +272,12 @@ export default function Chat() {
 
       {/* Filters row */}
       <div className="bg-white border border-gray-100 rounded-2xl p-3 mb-4 flex flex-wrap gap-2 items-center shadow-sm">
-        <select className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-400" value={salesFilter} onChange={(e) => setSalesFilter(e.target.value)}>
-          <option value="">Semua Sales</option>
-          {users.filter((u) => u.role === 'sales').map((u) => <option key={u.id} value={u.id}>{u.full_name}</option>)}
-        </select>
+        {!isSales && (
+          <select className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-400" value={salesFilter} onChange={(e) => setSalesFilter(e.target.value)}>
+            <option value="">Semua Sales</option>
+            {users.filter((u) => u.role === 'sales').map((u) => <option key={u.id} value={u.id}>{u.full_name}</option>)}
+          </select>
+        )}
         <select className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-400" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
           <option value="">Semua Status</option>
           {statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}

@@ -95,5 +95,7 @@ func handleWabaInboundMessage(msg WebhookMessage, contactName string) {
 		providerMessageID = &msg.ID
 	}
 
-	ingestInboundMessage(phone, contactName, msg.Text.Body, chatTime, sourceName, providerMessageID)
+	// WABA is single-number in this scope, so there's no session to resolve a
+	// sales rep from — the lead stays unassigned until an admin picks it up.
+	ingestInboundMessage(phone, contactName, msg.Text.Body, chatTime, sourceName, providerMessageID, nil)
 }

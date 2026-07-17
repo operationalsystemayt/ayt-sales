@@ -36,6 +36,7 @@ export const getMe = () => api.get('/auth/me')
 // Users
 export const getUsers = () => api.get('/users')
 export const createUser = (data: object) => api.post('/users', data)
+export const updateUser = (id: string, data: object) => api.put(`/users/${id}`, data)
 
 // Master
 export const getMasterSources = () => api.get('/master/sources')
@@ -108,6 +109,7 @@ export const getDashboardSummary = (params?: object) => api.get('/dashboard/summ
 export const getDashboardLeaderboard = (params?: object) => api.get('/dashboard/leaderboard', { params })
 export const getDashboardTopProducts = (params?: object) => api.get('/dashboard/top-products', { params })
 export const getDashboardChart = (params?: object) => api.get('/dashboard/chart', { params })
+export const syncDashboardAds = (params?: object) => api.post('/dashboard/ads/sync', null, { params })
 export const getTopTrips = (params?: object) => api.get('/dashboard/top-trips', { params })
 
 // Reports

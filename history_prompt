@@ -463,3 +463,283 @@ Generated credentials ready to copy
   Without customHeaders, WAHA's webhook calls to our backend won't carry X-Webhook-Secret, and our /api/webhooks/waha
   endpoint will reject them with 401 (per middleware.WebhookSecret in backend/internal/router/router.go) — so both fields
   matter here, not just events.
+
+
+
+  Berikut panduan lengkap deploy AYT Sales CRM ke 2 VPS terpisah di IDCloudHost — VPS-A untuk Backend+Frontend+PostgreSQL,
+  VPS-B untuk WAHA. Saya sudah cek konfigurasi project ini (.env.example, config.go, webhook_waha.go, docker-compose.yml,
+  Dockerfile) supaya nama env var dan endpoint yang saya sebut sesuai kode yang sebenarnya jalan.
+
+  Arsitektur
+
+  [Browser] → HTTPS → [VPS-A: Nginx → Frontend (dist/) + proxy /api → Go backend :8080 → PostgreSQL]
+                                                            ↑
+                                                webhook X-Webhook-Secret
+                                                            ↓
+  [WhatsApp] ↔ [VPS-B: Nginx → WAHA :3000 (Docker)] ──POST──┘
+
+  Backend di VPS-A yang memanggil WAHA di VPS-B (kirim pesan), dan WAHA di VPS-B yang memanggil balik backend di VPS-A
+  lewat webhook (pesan masuk). Jadi kedua VPS harus saling bisa diakses lewat internet (pakai domain+HTTPS, bukan IP
+  lokal).
+
+  ---
+  Persiapan di IDCloudHost
+
+  1. Order 2 VPS terpisah (menu Deka Cloud VPS), image Ubuntu 22.04 LTS, spek minimal 2 vCPU/2GB masing-masing.
+  2. Catat IP publik masing-masing — misal VPS_A_IP dan VPS_B_IP.
+  3. Kalau punya domain, arahkan 2 subdomain lewat DNS panel IDCloudHost (atau registrar lain):
+    - app.domainmu.com → VPS_A_IP (CRM)
+    - waha.domainmu.com → VPS_B_IP (WAHA)
+  4. SSH ke masing-masing VPS pakai root/password dari email provisioning IDCloudHost, lalu ganti password atau pasang SSH
+  key.
+
+  ---
+  VPS-A — Backend + Frontend + PostgreSQL
+
+  1. Setup dasar server
+
+  sudo apt update && sudo apt upgrade -y
+  sudo apt install -y curl git build-essential ufw
+  sudo ufw allow OpenSSH
+  sudo ufw allow 80
+  sudo ufw allow 443
+  sudo ufw enable
+
+  2. Install Go, Node, PostgreSQL, Nginx
+
+  wget https://go.dev/dl/go1.24.linux-amd64.tar.gz
+  sudo tar -C /usr/local -xzf go1.24.linux-amd64.tar.gz
+  echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc && source ~/.bashrc
+  go version
+
+  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+  source ~/.bashrc && nvm install 20
+
+  sudo apt install -y postgresql postgresql-contrib nginx
+  sudo systemctl enable --now postgresql nginx
+
+  3. Setup database
+
+  sudo -u postgres psql <<EOF
+  CREATE USER ayt_user WITH PASSWORD 'ganti-password-kuat';
+  CREATE DATABASE ayt_sales OWNER ayt_user;
+  GRANT ALL PRIVILEGES ON DATABASE ayt_sales TO ayt_user;
+  EOF
+
+  4. Clone & konfigurasi backend
+
+  sudo mkdir -p /var/www/ayt-sales && sudo chown $USER /var/www/ayt-sales
+  cd /var/www/ayt-sales && git clone <url-repo> .
+  cd backend
+
+  Buat .env — ini bagian pentingnya, isi WAHA_BASE_URL/WAHA_API_KEY mengarah ke VPS-B yang akan kamu setup di bawah, dan
+  catat WEBHOOK_SECRET karena dipakai lagi nanti di sisi WAHA:
+
+  cat > .env <<EOF
+  DB_HOST=localhost
+  DB_USER=ayt_user
+  DB_PASSWORD=ganti-password-kuat
+  DB_NAME=ayt_sales
+  DB_PORT=5432
+  JWT_SECRET=$(openssl rand -hex 32)
+  PORT=8080
+  WEBHOOK_SECRET=$(openssl rand -hex 24)
+  WAHA_BASE_URL=https://waha.domainmu.com
+  WAHA_API_KEY=ganti-dengan-api-key-waha-vps-b
+  WAHA_SESSION=default
+  EOF
+  cat .env   # simpan WEBHOOK_SECRET & rencanakan WAHA_API_KEY, dipakai lagi di VPS-B
+
+  5. Build & jalankan backend via systemd
+
+  go build -o ayt-backend ./cmd/server
+  sudo tee /etc/systemd/system/ayt-backend.service > /dev/null <<'EOF'
+  [Unit]
+  Description=AYT Sales CRM Backend
+  After=network.target postgresql.service
+
+  [Service]
+  Type=simple
+  User=www-data
+  WorkingDirectory=/var/www/ayt-sales/backend
+  ExecStart=/var/www/ayt-sales/backend/ayt-backend
+  Restart=always
+  RestartSec=5
+  Environment=GIN_MODE=release
+
+  [Install]
+  WantedBy=multi-user.target
+  EOF
+
+  sudo chown -R www-data:www-data /var/www/ayt-sales/backend
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now ayt-backend
+  sudo journalctl -u ayt-backend -f   # pastikan "Server running on :8080", lalu Ctrl+C
+
+  6. Build frontend
+
+  cd /var/www/ayt-sales/frontend
+  npm install
+  npm run build   # output di dist/
+
+  7. Nginx (frontend + proxy /api + proxy webhook publik)
+
+  sudo tee /etc/nginx/sites-available/ayt-sales > /dev/null <<'EOF'
+  server {
+      listen 80;
+      server_name app.domainmu.com;
+
+      root /var/www/ayt-sales/frontend/dist;
+      index index.html;
+
+      location / {
+          try_files $uri $uri/ /index.html;
+      }
+
+      location /api/ {
+          proxy_pass http://127.0.0.1:8080;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_read_timeout 60s;
+      }
+  }
+  EOF
+  sudo ln -s /etc/nginx/sites-available/ayt-sales /etc/nginx/sites-enabled/
+  sudo nginx -t && sudo systemctl reload nginx
+
+  8. HTTPS
+
+  sudo apt install -y certbot python3-certbot-nginx
+  sudo certbot --nginx -d app.domainmu.com
+
+  Test: buka https://app.domainmu.com, login pakai akun default (admin@ayt.com / admin123 — ganti segera).
+
+  ---
+  VPS-B — WAHA (WhatsApp HTTP API)
+
+  1. Setup dasar + Docker
+
+  sudo apt update && sudo apt upgrade -y
+  sudo apt install -y curl git ufw nginx
+  curl -fsSL https://get.docker.com | sudo sh
+  sudo usermod -aG docker $USER && newgrp docker
+
+  sudo ufw allow OpenSSH
+  sudo ufw allow 80
+  sudo ufw allow 443
+  sudo ufw enable
+
+  Port 3000 (WAHA) tidak dibuka ke publik — cukup diakses lewat Nginx di 443, supaya API key WAHA tidak lewat plain HTTP
+  dan tidak langsung exposed.
+
+  2. Docker Compose untuk WAHA
+
+  Pakai nama env var yang sama seperti setup dev project ini (WAHA_API_KEY, WAHA_DASHBOARD_USERNAME/PASSWORD,
+  WHATSAPP_SWAGGER_USERNAME/PASSWORD) — bedanya di VPS ini saya tambahkan volume persist session supaya WhatsApp tidak
+  perlu scan ulang QR tiap container restart (ini yang belum ada di setup dev kamu sekarang):
+
+  mkdir -p /opt/waha/sessions && cd /opt/waha
+  cat > docker-compose.yml <<EOF
+  services:
+    waha:
+      image: devlikeapro/waha:latest
+      restart: always
+      ports:
+        - "127.0.0.1:3000:3000"
+      volumes:
+        - ./sessions:/app/.sessions
+      environment:
+        WAHA_API_KEY: $(openssl rand -hex 16)
+        WAHA_DASHBOARD_USERNAME: admin
+        WAHA_DASHBOARD_PASSWORD: $(openssl rand -hex 12)
+        WHATSAPP_SWAGGER_USERNAME: admin
+        WHATSAPP_SWAGGER_PASSWORD: $(openssl rand -hex 12)
+        WHATSAPP_DEFAULT_ENGINE: WEBJS
+  EOF
+  cat docker-compose.yml   # CATAT WAHA_API_KEY — ini yang harus sama persis dengan WAHA_API_KEY di VPS-A .env
+  docker compose up -d
+  docker compose logs -f   # pastikan startup sukses, lalu Ctrl+C
+
+  ▎ 127.0.0.1:3000:3000 sengaja dibind ke localhost saja — akses publik hanya lewat Nginx.
+
+  3. Nginx reverse proxy + HTTPS untuk WAHA
+
+  sudo tee /etc/nginx/sites-available/waha > /dev/null <<'EOF'
+  server {
+      listen 80;
+      server_name waha.domainmu.com;
+
+      location / {
+          proxy_pass http://127.0.0.1:3000;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_read_timeout 300s;   # WAHA butuh koneksi lama untuk beberapa endpoint
+      }
+  }
+  EOF
+  sudo ln -s /etc/nginx/sites-available/waha /etc/nginx/sites-enabled/
+  sudo nginx -t && sudo systemctl reload nginx
+  sudo certbot --nginx -d waha.domainmu.com
+
+  4. Update .env di VPS-A dengan API key WAHA yang baru dicatat
+
+  # di VPS-A
+  cd /var/www/ayt-sales/backend
+  nano .env   # set WAHA_API_KEY sesuai yang dicetak docker-compose.yml di VPS-B
+  sudo systemctl restart ayt-backend
+
+  5. Scan QR & sambungkan nomor WhatsApp
+
+  Buka https://waha.domainmu.com/dashboard (login pakai WAHA_DASHBOARD_USERNAME/PASSWORD), buat session default, scan QR
+  dari HP WhatsApp yang mau dipakai.
+
+  6. Konfigurasi webhook WAHA → backend
+
+  Ini langkah yang menyambungkan pesan masuk WhatsApp ke CRM. Set webhook lewat API WAHA (lebih reliable daripada lewat
+  dashboard karena bisa set custom header X-Webhook-Secret yang dicek oleh middleware.WebhookSecret di backend):
+
+  curl -X POST https://waha.domainmu.com/api/sessions/default/start \
+    -H "X-Api-Key: <WAHA_API_KEY>" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "config": {
+        "webhooks": [{
+          "url": "https://app.domainmu.com/api/webhooks/waha",
+          "events": ["message"],
+          "customHeaders": [{ "name": "X-Webhook-Secret", "value": "<WEBHOOK_SECRET dari VPS-A>" }]
+        }]
+      }
+    }'
+
+  Kalau session sudah jalan (bukan baru start), pakai endpoint update config-nya (PUT /api/sessions/default) dengan body
+  yang sama — cek Swagger UI di https://waha.domainmu.com/ (login WHATSAPP_SWAGGER_USERNAME/PASSWORD) untuk endpoint
+  pastinya sesuai versi WAHA yang ter-pull, karena skema config webhook ini kadang berubah antar versi WAHA.
+
+  7. Terakhir, di CRM: set provider
+
+  Login sebagai admin di https://app.domainmu.com → Pengaturan → pilih WAHA (self-hosted) sebagai provider WhatsApp.
+
+  ---
+  Verifikasi end-to-end
+
+  1. Kirim pesan WhatsApp ke nomor yang di-link → cek muncul lead baru + chat masuk di menu Chat CRM.
+  2. Balas dari CRM (menu Chat) → cek pesan benar-benar terkirim ke WhatsApp penerima.
+  3. Cek log kalau ada masalah:
+  # VPS-A
+  sudo journalctl -u ayt-backend -f
+  # VPS-B
+  docker compose logs -f waha
+
+  Update kode nanti (redeploy)
+
+  # VPS-A
+  cd /var/www/ayt-sales && git pull
+  cd backend && go build -o ayt-backend ./cmd/server && sudo systemctl restart ayt-backend
+  cd ../frontend && npm install && npm run build && sudo systemctl reload nginx
+
+  # VPS-B (kalau ada update image WAHA)
+  cd /opt/waha && docker compose pull && docker compose up -d
