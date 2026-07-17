@@ -743,3 +743,783 @@ Generated credentials ready to copy
 
   # VPS-B (kalau ada update image WAHA)
   cd /opt/waha && docker compose pull && docker compose up -d
+
+
+
+  1. Dapatkan META_AD_ACCOUNT_ID
+
+  Paling gampang lewat Ads Manager:
+  1. Buka business.facebook.com/adsmanager
+  2. Lihat pojok kiri atas — ada dropdown nama akun iklan, atau cek di URL browser, ada parameter act=1234567890123
+  3. Ambil angkanya, lalu tambahkan prefix act_ di depan → jadi act_1234567890123
+
+  Alternatif: Business Settings → Accounts → Ad Accounts, ID-nya ditampilkan di situ juga.
+
+  2. Dapatkan META_ACCESS_TOKEN
+
+  Ini yang lebih banyak langkah karena harus lewat App + System User (supaya token-nya nggak expired dalam hitungan jam):
+
+  a. Buat Meta App
+  1. Buka developers.facebook.com/apps → Create App
+  2. Pilih tipe Business → isi nama app bebas (mis. "AYT Sales Dashboard") → pilih Business Portfolio kamu
+  3. Setelah app dibuat, di App Dashboard → Add Product → cari Marketing API → Set Up
+
+  b. Buat System User (biar token bisa permanent, nggak perlu login ulang tiap 60 hari)
+  1. Buka business.facebook.com/settings/system-users
+  2. Add → nama bebas (mis. "Dashboard Sync") → Role pilih Employee (cukup, nggak perlu Admin)
+  3. Setelah dibuat, klik system user itu → Add Assets → pilih Ad Accounts → pilih akun iklan kamu → kasih izin View performance (Analyst) atau Manage campaigns (Advertiser) — Analyst sudah cukup karena
+  kita cuma baca data
+
+  c. Generate Token
+  1. Masih di halaman System User yang sama → klik Generate New Token
+  2. Pilih App yang kamu buat di langkah (a)
+  3. Centang permission ads_read saja
+  4. Klik Generate Token → token akan muncul sekali — langsung copy dan simpan, karena tidak bisa dilihat lagi setelah ditutup
+  5. Kalau kelewat/hilang, tinggal generate baru dari system user yang sama
+
+  d. Isi ke .env
+  META_AD_ACCOUNT_ID=act_1234567890123
+  META_ACCESS_TOKEN=EAAxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+  Sebelum ditaruh di .env, test dulu tokennya biar nggak salah-salah restart server:
+  curl -G "https://graph.facebook.com/v20.0/act_1234567890123/insights" \
+    -d "fields=spend,impressions,clicks,actions,date_start" \
+    -d "time_range={'since':'2026-07-10','until':'2026-07-17'}" \
+    -d "time_increment=1" \
+    -d "access_token=EAAxxxxxxxx..."
+  Kalau hasilnya JSON data (bukan {"error":...}), berarti token & ad account ID sudah benar dan siap dipakai untuk tombol "Sync Meta Ads" di dashboard.
+
+  Kalau nanti muncul error izin ("does not have permission for this ad account" atau semacamnya), berarti langkah (b) assign system user ke ad account belum kena — cek lagi role-nya di sana.
+
+
+
+
+
+
+
+
+
+--------- DEPLOY -----------
+
+ 1. WAHA tanpa domain — bisa. Cukup firewall port WAHA di VPS-B supaya hanya bisa diakses dari IP VPS-A, backend hit langsung http://<IP_VPS_B>:3000. Tidak perlu
+  Nginx/SSL/domain di VPS-B sama sekali. (Kalau IDCloudHost punya fitur Private Network antar VPS dalam akun yang sama, itu lebih ideal — traffic nggak lewat
+  internet publik sama sekali, worth dicek 2 menit di panel mereka. Kalau tidak ada, firewall-restrict-by-IP di bawah ini sudah cukup aman.)
+  2. 1 instance WAHA banyak nomor — bisa, dan itu memang desain intinya. 1 WAHA instance bisa jalankan banyak session, tiap session = 1 nomor WhatsApp terpisah
+  (di-scan QR sendiri-sendiri). Jadi kamu tidak perlu 3 container Docker — cukup 1 container, buat 3 session dengan nama beda (saya pakai nomornya langsung: 62821,
+  62822, 62823, biar gampang dicocokkan ke field WAHA session tiap sales di Settings CRM). Ini persis skema yang kode kita sudah bangun minggu lalu — jadi tidak ada 
+  perubahan kode tambahan yang diperlukan. Lebih simpel juga buat dikelola/backup/restart dibanding 3 container terpisah.
+
+  Saya juga nemu di history_prompt kamu ternyata sudah pernah dikasih panduan deploy 2-VPS lengkap sebelumnya (VPS-A backend, VPS-B WAHA dengan domain+SSL). Saya
+  pakai ulang bagian VPS-A-nya (sudah tervalidasi cocok dengan kode project), dan saya tulis ulang bagian VPS-B supaya sesuai keputusan barusan: 1 instance, 3
+  session, tanpa domain.
+
+  ---
+  Arsitektur final
+
+  [Browser] → HTTPS → [VPS-A: Nginx → Frontend dist/ + proxy /api → Go backend :8080 → PostgreSQL]
+                                              ↑ webhook (X-Webhook-Secret)         │
+                                              │                                    │ HTTP polos, firewall-restricted
+  [WhatsApp] ↔ WAHA session 62821/62822/62823 di VPS-B :3000  ◄──────────────────┘
+
+  VPS-A butuh domain (Domainesia) + HTTPS karena browser & WhatsApp webhook harus bisa hit dia dari publik. VPS-B tidak butuh domain sama sekali — cukup dikunci
+  lewat firewall supaya hanya VPS-A yang bisa masuk.
+
+  ---
+  Persiapan
+
+  1. Order 2 VPS di IDCloudHost (Deka Cloud VPS), Ubuntu 22.04 LTS, minimal 2 vCPU/2GB masing-masing. Catat IP publik: VPS_A_IP, VPS_B_IP.
+  2. Di Domainesia: arahkan 1 subdomain ke VPS-A saja, misal app.domainmu.com → VPS_A_IP (A record). VPS-B tidak perlu entry DNS.
+  3. SSH ke keduanya, ganti password/pasang SSH key.
+
+  ---
+  VPS-B — WAHA (kerjakan ini duluan, biar API key-nya siap dipakai saat setup VPS-A)
+
+  1. Setup dasar + Docker
+  sudo apt update && sudo apt upgrade -y
+  sudo apt install -y curl ufw
+  curl -fsSL https://get.docker.com | sudo sh
+  sudo usermod -aG docker $USER && newgrp docker
+  
+  sudo ufw allow OpenSSH
+  # HANYA izinkan port WAHA dari IP VPS-A, tolak semua yang lain
+  sudo ufw allow from <VPS_A_IP> to any port 3000
+  sudo ufw enable
+  sudo ufw status verbose   # pastikan port 3000 TIDAK muncul sebagai "Anywhere"
+
+  2. Docker Compose — 1 instance, port dibuka ke semua interface (dibatasi firewall di atas, bukan 127.0.0.1 lagi karena VPS-A perlu akses dari luar)
+
+  mkdir -p /opt/waha/sessions && cd /opt/waha
+  cat > docker-compose.yml <<EOF
+  services:
+    waha:
+      image: devlikeapro/waha:latest
+      restart: always
+      ports:
+        - "0.0.0.0:3000:3000"
+        - ./sessions:/app/.sessions
+      environment:
+        WAHA_API_KEY: $(openssl rand -hex 16)
+        WAHA_DASHBOARD_USERNAME: admin
+        WAHA_DASHBOARD_PASSWORD: $(openssl rand -hex 12)
+        WHATSAPP_SWAGGER_USERNAME: admin
+        WHATSAPP_SWAGGER_PASSWORD: $(openssl rand -hex 12)
+        WHATSAPP_DEFAULT_ENGINE: WEBJS
+  EOF
+  cat docker-compose.yml   # CATAT WAHA_API_KEY — dipakai lagi di VPS-A .env
+  docker compose up -d
+  docker compose logs -f   # pastikan startup sukses, Ctrl+C setelah stabil
+
+  3. Buat 3 session — satu per nomor WhatsApp sales, webhook-nya langsung mengarah ke domain VPS-A (yang akan kamu setup sebentar lagi):
+
+  WEBHOOK_SECRET="<akan kamu generate di step VPS-A — isi setelah itu>"
+
+  for SESSION in 62821 62822 62823; do
+    curl -X POST http://localhost:3000/api/sessions \
+      -H "Content-Type: application/json" -H "X-Api-Key: $WAHA_KEY" \
+      -d "{
+        \"name\": \"$SESSION\",
+        \"config\": {
+          \"webhooks\": [{
+            \"url\": \"https://app.domainmu.com/api/webhooks/waha\",
+            \"events\": [\"message\"],
+            \"customHeaders\": [{ \"name\": \"X-Webhook-Secret\", \"value\": \"$WEBHOOK_SECRET\" }]
+          }]
+        }
+      }"
+  done
+
+  4. Scan/pairing code untuk tiap nomor (via SSH tunnel dari laptopmu, supaya tidak perlu buka port dashboard ke publik):
+  ssh -L 3000:localhost:3000 root@<VPS_B_IP>
+  # di tab lain / setelah tunnel jalan:
+  curl -X POST http://localhost:3000/api/62821/auth/request-code \
+    -H "Content-Type: application/json" -H "X-Api-Key: $WAHA_KEY" \
+    -d '{"phoneNumber": "62821xxxxxxx"}'
+  # ulangi untuk session 62822 dan 62823 dengan nomor masing-masing
+  # cek status sampai "WORKING":
+  curl -H "X-Api-Key: $WAHA_KEY" http://localhost:3000/api/sessions
+
+  ---
+  VPS-A — Backend + Frontend + PostgreSQL
+
+  1. Setup dasar
+  sudo apt update && sudo apt upgrade -y
+  sudo apt install -y curl git build-essential ufw nginx postgresql postgresql-contrib
+  sudo ufw allow OpenSSH && sudo ufw allow 80 && sudo ufw allow 443 && sudo ufw enable
+  sudo systemctl enable --now postgresql nginx
+
+  2. Install Go + Node
+  wget https://go.dev/dl/go1.24.linux-amd64.tar.gz
+  sudo tar -C /usr/local -xzf go1.24.linux-amd64.tar.gz
+  echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc && source ~/.bashrc
+  go version
+  
+  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+  source ~/.bashrc && nvm install 20
+
+  3. Database
+  sudo -u postgres psql <<EOF
+  CREATE USER ayt_user WITH PASSWORD 'ganti-password-kuat';
+  CREATE DATABASE ayt_sales OWNER ayt_user;
+  GRANT ALL PRIVILEGES ON DATABASE ayt_sales TO ayt_user;
+  EOF
+
+  4. Clone & .env
+
+  sudo mkdir -p /var/www/ayt-sales && sudo chown $USER /var/www/ayt-sales
+  cd /var/www/ayt-sales && git clone <url-repo-kamu> .
+  
+  cat > .env <<EOF
+  DB_HOST=localhost
+  DB_USER=ayt_user
+  DB_PASSWORD=ganti-password-kuat
+  DB_NAME=ayt_sales
+  DB_PORT=5432
+  JWT_SECRET=$(openssl rand -hex 32)
+  PORT=8080
+  WEBHOOK_SECRET=$(openssl rand -hex 24)
+  WAHA_BASE_URL=http://<VPS_B_IP>:3000
+  WAHA_API_KEY=<WAHA_API_KEY dari VPS-B>
+  WAHA_SESSION=62821
+  EOF
+  cat .env
+  WAHA_SESSION di sini cuma jadi fallback default (dipakai kalau ada lead yang sales-nya belum di-set waha_session-nya) — pengiriman pesan yang sebenarnya tetap
+  otomatis pakai session sesuai sales yang di-assign ke lead. Copy nilai WEBHOOK_SECRET yang baru di-generate ini balik ke perintah curl POST /api/sessions di VPS-B
+  step 3 kalau belum kamu isi.
+
+  5. Build & systemd
+
+  go build -o ayt-backend ./cmd/server
+  sudo tee /etc/systemd/system/ayt-backend.service > /dev/null <<'EOF'
+  [Unit]
+  Description=AYT Sales CRM Backend
+  After=network.target postgresql.service
+
+  [Service]
+  Type=simple
+  User=www-data
+  WorkingDirectory=/var/www/ayt-sales/backend
+  Restart=always
+  RestartSec=5
+  Environment=GIN_MODE=release
+
+  [Install]
+  WantedBy=multi-user.target
+  EOF
+
+  sudo chown -R www-data:www-data /var/www/ayt-sales/backend
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now ayt-backend
+  sudo journalctl -u ayt-backend -f   # pastikan "Server running on :8080", lalu Ctrl+C
+
+  6. Build frontend
+  cd /var/www/ayt-sales/frontend
+  npm install
+  npm run build
+
+  7. Nginx
+
+  sudo tee /etc/nginx/sites-available/ayt-sales > /dev/null <<'EOF'
+  server {
+      listen 80;
+      server_name app.domainmu.com;
+
+      root /var/www/ayt-sales/frontend/dist;
+      index index.html;
+
+      location / {
+          try_files $uri $uri/ /index.html;
+      }
+
+      location /api/ {
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_read_timeout 60s;
+      }   
+  }
+      -d "{
+        \"name\": \"$SESSION\",
+        \"config\": {
+          \"webhooks\": [{
+            \"url\": \"https://app.domainmu.com/api/webhooks/waha\",
+            \"events\": [\"message\"],
+            \"customHeaders\": [{ \"name\": \"X-Webhook-Secret\", \"value\": \"$WEBHOOK_SECRET\" }]
+          }]
+        }
+      }"
+  done
+
+  1. Kirim WhatsApp ke nomor 62821 → cek lead baru muncul di CRM dengan Sales = pemilik session 62821 (otomatis, sesuai fitur auto-assign yang sudah kita bangun).
+  2. Balas dari tab Chat CRM → pastikan terkirim, dan cek balasan itu keluar dari nomor 62821 (bukan nomor lain).
+  3. Sebagai admin, pindahkan lead itu ke sales lain (misal pemilik 62822) → balas lagi → pastikan sekarang keluar dari nomor 62822.
+  4. Cek log kalau ada masalah:
+  # VPS-A
+  sudo journalctl -u ayt-backend -f
+  # VPS-B
+  cd /opt/waha && docker compose logs -f
+
+  Redeploy setelah update kode
+
+  # VPS-A
+  
+  1. Setup dasar
+  sudo apt update && sudo apt upgrade -y
+  sudo apt install -y curl git build-essential ufw nginx postgresql postgresql-contrib
+  sudo ufw allow OpenSSH && sudo ufw allow 80 && sudo ufw allow 443 && sudo ufw enable
+  sudo systemctl enable --now postgresql nginx
+
+  2. Install Go + Node
+  wget https://go.dev/dl/go1.24.linux-amd64.tar.gz
+  sudo tar -C /usr/local -xzf go1.24.linux-amd64.tar.gz
+  echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc && source ~/.bashrc
+  go version
+
+  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+  source ~/.bashrc && nvm install 20
+
+  3. Database
+  sudo -u postgres psql <<EOF
+  CREATE USER ayt_user WITH PASSWORD 'ganti-password-kuat';
+  CREATE DATABASE ayt_sales OWNER ayt_user;
+  GRANT ALL PRIVILEGES ON DATABASE ayt_sales TO ayt_user;
+  EOF
+
+  4. Clone & .env
+  sudo mkdir -p /var/www/ayt-sales && sudo chown $USER /var/www/ayt-sales
+  cd /var/www/ayt-sales && git clone <url-repo-kamu> .
+  cd backend
+
+  cat > .env <<EOF
+  DB_HOST=localhost
+  DB_USER=ayt_user
+  DB_PASSWORD=ganti-password-kuat
+  DB_NAME=ayt_sales
+  DB_PORT=5432
+  JWT_SECRET=$(openssl rand -hex 32)
+  PORT=8080
+  WEBHOOK_SECRET=$(openssl rand -hex 24)
+  WAHA_BASE_URL=http://<VPS_B_IP>:3000
+  WAHA_API_KEY=<WAHA_API_KEY dari VPS-B>
+  WAHA_SESSION=62821
+  EOF
+  cat .env
+  WAHA_SESSION di sini cuma jadi fallback default (dipakai kalau ada lead yang sales-nya belum di-set waha_session-nya) — pengiriman pesan yang sebenarnya tetap
+  otomatis pakai session sesuai sales yang di-assign ke lead. Copy nilai WEBHOOK_SECRET yang baru di-generate ini balik ke perintah curl POST /api/sessions di VPS-B
+  step 3 kalau belum kamu isi.
+
+  5. Build & systemd
+  go build -o ayt-backend ./cmd/server
+  sudo tee /etc/systemd/system/ayt-backend.service > /dev/null <<'EOF'
+  [Unit]
+  Description=AYT Sales CRM Backend
+  After=network.target postgresql.service
+
+  [Service]
+  Type=simple
+  User=www-data
+  WorkingDirectory=/var/www/ayt-sales/backend
+  ExecStart=/var/www/ayt-sales/backend/ayt-backend
+  Restart=always
+  RestartSec=5
+  Environment=GIN_MODE=release
+
+  [Install]
+  WantedBy=multi-user.target
+  EOF
+
+  sudo chown -R www-data:www-data /var/www/ayt-sales/backend
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now ayt-backend
+  sudo journalctl -u ayt-backend -f   # pastikan "Server running on :8080", lalu Ctrl+C
+
+  6. Build frontend
+  cd /var/www/ayt-sales/frontend
+  npm install
+  npm run build
+
+  7. Nginx
+  sudo tee /etc/nginx/sites-available/ayt-sales > /dev/null <<'EOF'
+  server {
+      listen 80;
+      server_name app.domainmu.com;
+
+      root /var/www/ayt-sales/frontend/dist;
+      index index.html;
+
+      location / {
+          try_files $uri $uri/ /index.html;
+      }
+
+      location /api/ {
+          proxy_pass http://127.0.0.1:8080;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_read_timeout 60s;
+      }
+  }
+  EOF
+  sudo ln -s /etc/nginx/sites-available/ayt-sales /etc/nginx/sites-enabled/
+  sudo nginx -t && sudo systemctl reload nginx
+
+  sudo apt install -y certbot python3-certbot-nginx
+  sudo certbot --nginx -d app.domainmu.com
+
+  8. Login & konfigurasi
+  1. Buka https://app.domainmu.com, login admin@ayt.com / admin123 → ganti password admin segera.
+  2. Pengaturan → Provider WhatsApp → pilih WAHA (self-hosted) → Simpan.
+  3. Pengaturan → Kelola User → edit tiap sales (Raya/Jean/Jevry atau user yang kamu buat) → isi field WAHA session dengan nama session yang sesuai (62821, 62822,
+  atau 62823) sesuai nomor yang jadi milik sales itu.
+
+  ---
+  Verifikasi end-to-end
+
+  1. Kirim WhatsApp ke nomor 62821 → cek lead baru muncul di CRM dengan Sales = pemilik session 62821 (otomatis, sesuai fitur auto-assign yang sudah kita bangun).
+  2. Balas dari tab Chat CRM → pastikan terkirim, dan cek balasan itu keluar dari nomor 62821 (bukan nomor lain).
+  3. Sebagai admin, pindahkan lead itu ke sales lain (misal pemilik 62822) → balas lagi → pastikan sekarang keluar dari nomor 62822.
+  4. Cek log kalau ada masalah:
+  # VPS-A
+  sudo journalctl -u ayt-backend -f
+  # VPS-B
+  cd /opt/waha && docker compose logs -f
+
+  Redeploy setelah update kode
+
+  # VPS-A
+  cd /var/www/ayt-sales && git pull
+  cd backend && go build -o ayt-backend ./cmd/server && sudo systemctl restart ayt-backend
+  cd ../frontend && npm install && npm run build && sudo systemctl reload nginx
+
+  # VPS-B (kalau ada update image WAHA)
+  cd /opt/waha && docker compose pull && docker compose up -d
+
+  ---
+  Satu hal yang perlu kamu putuskan sebelum production live: koneksi VPS-A → VPS-B lewat HTTP polos (bukan HTTPS) karena tanpa domain. Aman selama firewall di VPS-B
+  benar-benar membatasi hanya IP VPS-A (ufw status verbose untuk cek), tapi kalau kamu mau lebih aman lagi tanpa ribet setup domain+SSL untuk VPS-B, cek dulu apakah
+  IDCloudHost punya fitur Private Network/VPC antar VPS dalam akun yang sama — kalau ada, pakai IP private itu untuk WAHA_BASE_URL dan ufw allow from di atas, jadi
+  traffic sama sekali nggak lewat internet publik.
+
+
+
+
+
+
+  -------- DEPLOY V2 -----------
+  Step 0 — Generate shared secret dulu (di laptop kamu atau VPS mana saja)
+
+  openssl rand -hex 24
+  Simpan hasilnya — ini WEBHOOK_SECRET yang dipakai persis sama di VPS-A (.env) dan VPS-B (config webhook tiap session). Sebut saja <WEBHOOK_SECRET> di bawah, ganti
+  dengan nilai asli. a1fe56bc33e9dfb1ce6ce1a8e63af6110013a05cca1041bb
+
+  ---
+  VPS-B (aytsaleswaha, private IP 10.150.74.5) — Bagian 1: Docker + WAHA
+
+  1. Setup dasar + Docker
+  sudo apt update && sudo apt upgrade -y
+  sudo apt install -y curl ufw
+  curl -fsSL https://get.docker.com | sudo sh
+  sudo usermod -aG docker $USER && newgrp docker
+
+  sudo ufw allow OpenSSH
+  # HANYA izinkan port WAHA dari private IP VPS-A — bukan public IP
+  sudo ufw allow from 10.150.74.4 to any port 3000
+  sudo ufw enable
+  sudo ufw status verbose   # pastikan port 3000 muncul dengan source 10.150.74.4, BUKAN "Anywhere"
+
+  2. Generate & simpan credentials dulu sebagai variabel shell (supaya tidak perlu copy-paste manual dari output cat):
+
+  export WAHA_DASH_PASS=54e880fad25076e5c64dbfeb
+  export WAHA_SWAGGER_PASS=54e880fad25076e5c64dbfeb
+  export WAHA_KEY=e3af51043f031366b08bdc4e7c913eb7
+
+  sudo mkdir -p /opt/waha && cd /opt/waha
+  cat > ~/waha-credentials.txt <<EOF
+  WAHA_API_KEY=$WAHA_KEY
+  WAHA_DASHBOARD_USERNAME=admin
+  WAHA_DASHBOARD_PASSWORD=$WAHA_DASH_PASS
+  WHATSAPP_SWAGGER_USERNAME=admin
+  WHATSAPP_SWAGGER_PASSWORD=$WAHA_SWAGGER_PASS
+  EOF
+  cat ~/waha-credentials.txt   # CATAT WAHA_API_KEY — dipakai lagi di VPS-A .env
+
+  ▎ Kalau nanti kamu putus SSH dan connect ulang, $WAHA_KEY hilang dari shell — tinggal jalankan export WAHA_KEY=$(grep WAHA_API_KEY ~/waha-credentials.txt | cut -d=
+  ▎ -f2) untuk pulihkan.
+
+  3. docker-compose.yml — port dibind ke private IP saja (bukan 0.0.0.0, bukan 127.0.0.1), jadi WAHA sama sekali tidak reachable dari internet publik, cuma dari
+  dalam VPC:
+
+  mkdir -p /opt/waha/sessions && cd /opt/waha
+  cat > docker-compose.yml <<EOF
+  services:
+    waha:
+      image: devlikeapro/waha:latest
+      restart: always
+      ports:
+        - "10.150.74.5:3000:3000"
+      volumes:
+        - ./sessions:/app/.sessions
+      environment:
+        WAHA_API_KEY: $WAHA_KEY
+        WAHA_DASHBOARD_USERNAME: admin
+        WAHA_DASHBOARD_PASSWORD: $WAHA_DASH_PASS
+        WHATSAPP_SWAGGER_USERNAME: admin
+        WHATSAPP_SWAGGER_PASSWORD: $WAHA_SWAGGER_PASS
+        WHATSAPP_DEFAULT_ENGINE: WEBJS
+  EOF
+
+  docker compose up -d
+  docker compose logs -f   # pastikan startup sukses, Ctrl+C setelah stabil
+
+  ---
+  VPS-A (aytsales, private IP 10.150.74.4, public IP 103.171.84.157) — Backend + Frontend + PostgreSQL
+
+  1. Setup dasar
+  sudo apt update && sudo apt upgrade -y
+  sudo apt install -y curl git build-essential ufw nginx postgresql postgresql-contrib
+  sudo ufw allow OpenSSH && sudo ufw allow 80 && sudo ufw allow 443 && sudo ufw enable
+  sudo systemctl enable --now postgresql nginx
+
+  2. Install Go + Node
+  GO_VERSION=$(curl -s https://go.dev/VERSION?m=text | head -1)
+  echo $GO_VERSION   # pastikan formatnya seperti "go1.24.x", bukan kosong/error
+
+  wget https://go.dev/dl/${GO_VERSION}.linux-amd64.tar.gz
+  sudo tar -C /usr/local -xzf ${GO_VERSION}.linux-amd64.tar.gz
+  echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc && source ~/.bashrc
+  go version
+  
+  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+  source ~/.bashrc && nvm install 20
+
+  3. Database
+  sudo -u postgres psql <<EOF
+  CREATE USER ayt_user WITH PASSWORD 'P@ssw0rd1234';
+  CREATE DATABASE ayt_sales OWNER ayt_user;
+  GRANT ALL PRIVILEGES ON DATABASE ayt_sales TO ayt_user;
+  EOF
+
+  4. Clone & .env
+
+  sudo mkdir -p /var/www/ayt-sales && sudo chown $USER /var/www/ayt-sales
+  cd /var/www/ayt-sales && git clone <url-repo-kamu> .
+  cd backend
+  cat > .env <<EOF
+  DB_HOST=localhost
+  DB_USER=ayt_user
+  DB_PASSWORD=P@ssw0rd1234
+  DB_NAME=ayt_sales
+  DB_PORT=5432
+  JWT_SECRET=$(openssl rand -hex 32)
+  PORT=8080
+  WEBHOOK_SECRET=<WEBHOOK_SECRET dari Step 0>
+  WAHA_BASE_URL=http://10.150.74.5:3000
+  WAHA_API_KEY=<WAHA_API_KEY dari VPS-B ~/waha-credentials.txt>
+  WAHA_SESSION=62821
+  EOF
+  cat .env
+
+  WAHA_SESSION=62821 di sini cuma fallback default (dipakai kalau ada lead yang sales-nya belum diisi waha_session-nya di Settings) — pengiriman pesan sebenarnya
+  otomatis ikut session sales yang di-assign ke lead.
+
+  5. Build & systemd
+
+  go build -o ayt-backend ./cmd/server
+  sudo tee /etc/systemd/system/ayt-backend.service > /dev/null <<'EOF'
+  [Unit]
+  Description=AYT Sales CRM Backend
+  After=network.target postgresql.service
+
+  [Service]
+  Type=simple
+  User=www-data
+  WorkingDirectory=/var/www/ayt-sales/backend
+  Restart=always
+  RestartSec=5
+  Environment=GIN_MODE=release
+  
+  [Install]
+  WantedBy=multi-user.target
+  EOF
+
+  sudo chown -R www-data:www-data /var/www/ayt-sales/backend
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now ayt-backend
+  sudo journalctl -u ayt-backend -f   # pastikan "Server running on :8080", lalu Ctrl+C
+
+  6. Build frontend
+  cd /var/www/ayt-sales/frontend
+  npm install
+  npm run build
+
+  7. Nginx + HTTPS
+
+  sudo tee /etc/nginx/sites-available/ayt-sales > /dev/null <<'EOF'
+  server {
+      listen 80;
+      server_name app.domainmu.com;
+
+      root /var/www/ayt-sales/frontend/dist;
+      index index.html;
+
+      location / {
+          try_files $uri $uri/ /index.html;
+      }
+      location /api/ {
+          proxy_pass http://127.0.0.1:8080;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_read_timeout 60s;
+      }
+  }   
+  EOF
+  sudo ln -s /etc/nginx/sites-available/ayt-sales /etc/nginx/sites-enabled/
+  sudo nginx -t && sudo systemctl reload nginx
+
+  sudo apt install -y certbot python3-certbot-nginx
+  sudo certbot --nginx -d app.domainmu.com
+  (Domainesia: pastikan A record app.domainmu.com → 103.171.84.157 sudah aktif sebelum jalankan certbot.)
+
+  ---
+  VPS-B — Bagian 2: Buat 3 session + hubungkan nomor
+
+  Sekarang balik ke VPS-B (WEBHOOK_SECRET dan app.domainmu.com sudah siap):
+
+  1. Buat 3 session, satu per nomor sales:
+
+  cd /opt/waha
+  # export WAHA_KEY=$(grep WAHA_API_KEY ~/waha-credentials.txt | cut -d= -f2)
+
+  for SESSION in 62821 62822 62823; do
+    curl -X POST http://localhost:3000/api/sessions \
+      -H "Content-Type: application/json" -H "X-Api-Key: $WAHA_KEY" \
+      -d "{
+        \"name\": \"$SESSION\",
+        \"config\": {
+          \"webhooks\": [{
+            \"url\": \"https://app.domainmu.com/api/webhooks/waha\",
+            \"events\": [\"message\"],
+            \"customHeaders\": [{ \"name\": \"X-Webhook-Secret\", \"value\": \"<WEBHOOK_SECRET dari Step 0>\" }]
+          }]
+        }
+      }"
+  done
+
+  2. Scan/pairing code untuk tiap nomor, lewat SSH tunnel dari laptopmu (tidak perlu buka port dashboard ke publik):
+  # dari laptop:
+  ssh -L 3000:localhost:3000 <user>@103.174.114.60
+  Di terminal lain (tunnel tetap jalan), atau langsung di VPS-B via SSH biasa:
+  curl -X POST http://localhost:3000/api/62821/auth/request-code \
+    -H "Content-Type: application/json" -H "X-Api-Key: $WAHA_KEY" \
+    -d '{"phoneNumber": "62821xxxxxxx"}'
+  # ulangi ganti "62821" jadi "62822" dan "62823" dengan nomor masing-masing
+
+  # cek status semua session sampai "WORKING":
+  curl -H "X-Api-Key: $WAHA_KEY" http://localhost:3000/api/sessions
+
+  ---
+  Login & konfigurasi terakhir (di browser)
+
+  DB_PASSWORD=ganti-password-kuat
+  DB_NAME=ayt_sales
+  DB_PORT=5432
+  JWT_SECRET=$(openssl rand -hex 32)
+  PORT=8080
+  WEBHOOK_SECRET=<WEBHOOK_SECRET dari Step 0>
+  WAHA_BASE_URL=http://10.150.74.5:3000
+  WAHA_API_KEY=<WAHA_API_KEY dari VPS-B ~/waha-credentials.txt>
+  WAHA_SESSION=62821
+  EOF
+  cat .env
+  WAHA_SESSION=62821 di sini cuma fallback default (dipakai kalau ada lead yang sales-nya belum diisi waha_session-nya di Settings) — pengiriman pesan sebenarnya
+  otomatis ikut session sales yang di-assign ke lead.
+
+  5. Build & systemd
+  go build -o ayt-backend ./cmd/server
+  sudo tee /etc/systemd/system/ayt-backend.service > /dev/null <<'EOF'
+  [Unit]
+  Description=AYT Sales CRM Backend
+  After=network.target postgresql.service
+
+  [Service]
+  Type=simple
+  User=www-data
+  WorkingDirectory=/var/www/ayt-sales/backend
+  ExecStart=/var/www/ayt-sales/backend/ayt-backend
+  Restart=always
+  RestartSec=5
+  Environment=GIN_MODE=release
+
+  [Install]
+  WantedBy=multi-user.target
+  EOF
+
+  sudo chown -R www-data:www-data /var/www/ayt-sales/backend
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now ayt-backend
+  sudo journalctl -u ayt-backend -f   # pastikan "Server running on :8080", lalu Ctrl+C
+
+  6. Build frontend
+  cd /var/www/ayt-sales/frontend
+  npm install
+  npm run build
+
+  7. Nginx + HTTPS
+  sudo tee /etc/nginx/sites-available/ayt-sales > /dev/null <<'EOF'
+  server {
+      listen 80;
+      server_name app.domainmu.com;
+
+      root /var/www/ayt-sales/frontend/dist;
+      index index.html;
+
+      location / {
+          try_files $uri $uri/ /index.html;
+      }
+
+      location /api/ {
+          proxy_pass http://127.0.0.1:8080;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_read_timeout 60s;
+      }
+  }
+  EOF
+  sudo ln -s /etc/nginx/sites-available/ayt-sales /etc/nginx/sites-enabled/
+  sudo nginx -t && sudo systemctl reload nginx
+
+  sudo apt install -y certbot python3-certbot-nginx
+  sudo certbot --nginx -d app.domainmu.com
+  (Domainesia: pastikan A record app.domainmu.com → 103.171.84.157 sudah aktif sebelum jalankan certbot.)
+
+  ---
+  VPS-B — Bagian 2: Buat 3 session + hubungkan nomor
+
+  Sekarang balik ke VPS-B (WEBHOOK_SECRET dan app.domainmu.com sudah siap):
+
+  1. Buat 3 session, satu per nomor sales:
+  cd /opt/waha
+  # kalau $WAHA_KEY sudah hilang dari shell:
+  # export WAHA_KEY=$(grep WAHA_API_KEY ~/waha-credentials.txt | cut -d= -f2)
+
+  for SESSION in 62821 62822 62823; do
+    curl -X POST http://localhost:3000/api/sessions \
+      -H "Content-Type: application/json" -H "X-Api-Key: $WAHA_KEY" \
+      -d "{
+        \"name\": \"$SESSION\",
+        \"config\": {
+          \"webhooks\": [{
+            \"url\": \"https://app.domainmu.com/api/webhooks/waha\",
+            \"events\": [\"message\"],
+            \"customHeaders\": [{ \"name\": \"X-Webhook-Secret\", \"value\": \"<WEBHOOK_SECRET dari Step 0>\" }]
+          }]
+        }
+      }"
+  done
+
+  2. Scan/pairing code untuk tiap nomor, lewat SSH tunnel dari laptopmu (tidak perlu buka port dashboard ke publik):
+  # dari laptop:
+  ssh -L 3000:localhost:3000 <user>@103.174.114.60
+  Di terminal lain (tunnel tetap jalan), atau langsung di VPS-B via SSH biasa:
+  curl -X POST http://localhost:3000/api/62821/auth/request-code \
+    -H "Content-Type: application/json" -H "X-Api-Key: $WAHA_KEY" \
+    -d '{"phoneNumber": "62821xxxxxxx"}'
+  # ulangi ganti "62821" jadi "62822" dan "62823" dengan nomor masing-masing
+
+  # cek status semua session sampai "WORKING":
+  curl -H "X-Api-Key: $WAHA_KEY" http://localhost:3000/api/sessions
+
+  ---
+  Login & konfigurasi terakhir (di browser)
+
+  1. Buka https://app.domainmu.com, login admin@ayt.com / admin123 → ganti password admin segera.
+  2. Pengaturan → Provider WhatsApp → pilih WAHA (self-hosted) → Simpan.
+  3. Pengaturan → Kelola User → edit tiap sales → isi field WAHA session dengan 62821/62822/62823 sesuai nomor milik sales itu.
+
+  ---
+  Verifikasi end-to-end
+
+  1. Kirim WhatsApp ke nomor 62821 → cek lead baru muncul di CRM dengan Sales = pemilik session 62821 (otomatis).
+  2. Balas dari tab Chat CRM → pastikan terkirim dan keluar dari nomor 62821.
+  3. Sebagai admin, pindahkan lead itu ke sales lain (pemilik 62822) → balas lagi → pastikan sekarang keluar dari nomor 62822.
+  4. Cek log kalau ada masalah:
+  # VPS-A
+  sudo journalctl -u ayt-backend -f
+  # VPS-B
+  cd /opt/waha && docker compose logs -f
+
+  Redeploy setelah update kode
+
+  # VPS-A
+  cd /var/www/ayt-sales && git pull
+  cd backend && go build -o ayt-backend ./cmd/server && sudo systemctl restart ayt-backend
+  cd ../frontend && npm install && npm run build && sudo systemctl reload nginx
+
+  # VPS-B (kalau ada update image WAHA)
+  cd /opt/waha && docker compose pull && docker compose up -d
+                                                                                              /rc active
