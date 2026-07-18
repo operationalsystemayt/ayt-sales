@@ -23,6 +23,7 @@ type Config struct {
 	WahaSession       string
 	MetaAdAccountID   string
 	MetaAccessToken   string
+	FrontendOrigin    string
 }
 
 func Load() *Config {
@@ -45,6 +46,7 @@ func Load() *Config {
 		WahaSession:       getEnv("WAHA_SESSION", "default"),
 		MetaAdAccountID:   getEnv("META_AD_ACCOUNT_ID", ""),
 		MetaAccessToken:   getEnv("META_ACCESS_TOKEN", ""),
+		FrontendOrigin:    getEnv("FRONTEND_ORIGIN", ""),
 	}
 }
 

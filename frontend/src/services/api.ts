@@ -1,6 +1,9 @@
 import axios from 'axios'
 
-const api = axios.create({ baseURL: '/api' })
+// VITE_API_URL lets the frontend point at a backend on a different domain
+// (e.g. separate frontend/backend domains in production). Falls back to a
+// relative /api path for local dev, where Vite proxies it to localhost:8080.
+const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || '/api' })
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token')

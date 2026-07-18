@@ -2,6 +2,7 @@ package router
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ayt-sales/backend/internal/config"
@@ -36,8 +37,19 @@ func Setup(cfg *config.Config) *gin.Engine {
 		)
 	})
 
+	allowOrigins := []string{"http://localhost:5173", "http://localhost:3000"}
+	if cfg.FrontendOrigin != "" {
+		// FRONTEND_ORIGIN may be a comma-separated list (e.g. http:// and https://
+		// variants of the production frontend domain during initial rollout).
+		for _, origin := range strings.Split(cfg.FrontendOrigin, ",") {
+			if o := strings.TrimSpace(origin); o != "" {
+				allowOrigins = append(allowOrigins, o)
+			}
+		}
+	}
+
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:5173", "http://localhost:3000"},
+		AllowOrigins:     allowOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		AllowCredentials: true,
