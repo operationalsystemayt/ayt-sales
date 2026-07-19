@@ -4,6 +4,8 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, Legend
 } from 'recharts'
 import Layout from '../components/Layout/Layout'
+import PeriodFilter from '../components/ui/PeriodFilter'
+import { getDateRange, fmtISODate, type Period } from '../utils/dateRange'
 import {
   getDashboardSummary, getDashboardLeaderboard, getDashboardTopProducts,
   getDashboardChart, getTopTrips, syncDashboardAds
@@ -18,34 +20,9 @@ const fmt = (n: number) =>
     ? (n / 1_000_000).toFixed(1) + ' jt'
     : n.toLocaleString('id-ID')
 
-type Period = 'today' | '7d' | '30d' | 'month'
-
-function getDateRange(period: Period) {
-  const now = new Date()
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-  if (period === 'today') return { date_from: fmt(now), date_to: fmt(now) }
-  if (period === '7d') {
-    const from = new Date(now); from.setDate(now.getDate() - 6)
-    return { date_from: fmt(from), date_to: fmt(now) }
-  }
-  if (period === 'month') {
-    const from = new Date(now.getFullYear(), now.getMonth(), 1)
-    return { date_from: fmt(from), date_to: fmt(now) }
-  }
-  const from = new Date(now); from.setDate(now.getDate() - 29)
-  return { date_from: fmt(from), date_to: fmt(now) }
-}
-
-const PERIODS: { key: Period; label: string }[] = [
-  { key: 'today', label: 'Hari Ini' },
-  { key: '7d', label: '7 Hari' },
-  { key: '30d', label: '30 Hari' },
-  { key: 'month', label: 'Bulan Ini' },
-]
-
 export default function Dashboard() {
   const [period, setPeriod] = useState<Period>('30d')
+  const [customRange, setCustomRange] = useState({ date_from: fmtISODate(new Date()), date_to: fmtISODate(new Date()) })
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
   const [leaderboard, setLeaderboard] = useState<LeaderboardRow[]>([])
   const [topProducts, setTopProducts] = useState<TopProductRow[]>([])
@@ -58,16 +35,16 @@ export default function Dashboard() {
     getDashboardChart(params).then((r) => setChartData(r.data ?? [])).catch((e) => console.error('[Dashboard] chart:', e))
 
   useEffect(() => {
-    const params = getDateRange(period)
+    const params = getDateRange(period, customRange)
     getDashboardSummary(params).then((r) => setSummary(r.data)).catch((e) => console.error('[Dashboard] summary:', e))
     getDashboardLeaderboard(params).then((r) => setLeaderboard(r.data ?? [])).catch((e) => console.error('[Dashboard] leaderboard:', e))
     getDashboardTopProducts(params).then((r) => setTopProducts(r.data ?? [])).catch((e) => console.error('[Dashboard] top-products:', e))
     fetchChart(params)
     getTopTrips(params).then((r) => setTopTrips(r.data ?? [])).catch((e) => console.error('[Dashboard] top-trips:', e))
-  }, [period])
+  }, [period, customRange])
 
   const handleSyncAds = async () => {
-    const params = getDateRange(period)
+    const params = getDateRange(period, customRange)
     setSyncingAds(true)
     setAdsSyncError(null)
     try {
@@ -82,10 +59,10 @@ export default function Dashboard() {
   }
 
   const totalAdSpend = chartData.reduce((sum, r) => sum + (r.ad_spend ?? 0), 0)
-  const totalRevenue = chartData.reduce((sum, r) => sum + (r.revenue ?? 0), 0)
+  const totalDealsValue = chartData.reduce((sum, r) => sum + (r.total_price ?? 0), 0)
   const totalAdsConversations = chartData.reduce((sum, r) => sum + (r.ads_conversations ?? 0), 0)
   const costPerLead = totalAdsConversations > 0 ? totalAdSpend / totalAdsConversations : 0
-  const roas = totalAdSpend > 0 ? totalRevenue / totalAdSpend : 0
+  const roas = totalAdSpend > 0 ? totalDealsValue / totalAdSpend : 0
 
   const kpis = summary
     ? [
@@ -98,7 +75,7 @@ export default function Dashboard() {
         ...(totalAdSpend > 0
           ? [
               { label: 'Cost / Lead (Ads)', value: `Rp ${fmt(costPerLead)}`, icon: Megaphone, color: 'text-red-600 bg-red-50', trend: null },
-              { label: 'ROAS', value: `${roas.toFixed(2)}x`, icon: TrendingUp, color: 'text-orange-600 bg-orange-50', trend: null },
+              { label: 'ROAS (Deals/Ads Spend)', value: `${roas.toFixed(2)}x`, icon: TrendingUp, color: 'text-orange-600 bg-orange-50', trend: null },
             ]
           : []),
       ]
@@ -110,22 +87,7 @@ export default function Dashboard() {
     <Layout title="Dashboard">
       {/* Period filter */}
       <div className="flex items-center gap-2 mb-2 flex-wrap">
-        <span className="text-sm text-gray-500 font-medium">Periode</span>
-        <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
-          {PERIODS.map(({ key, label }) => (
-            <button
-              key={key}
-              onClick={() => setPeriod(key)}
-              className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-all ${
-                period === key
-                  ? 'bg-white text-blue-600 shadow-sm'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <PeriodFilter period={period} onChange={setPeriod} custom={customRange} onCustomChange={setCustomRange} />
         <button
           onClick={handleSyncAds}
           disabled={syncingAds}
@@ -162,6 +124,10 @@ export default function Dashboard() {
             <ResponsiveContainer width="100%" height={220}>
               <AreaChart data={chartData}>
                 <defs>
+                  <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.15} />
+                    <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                  </linearGradient>
                   <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.15} />
                     <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
@@ -176,7 +142,8 @@ export default function Dashboard() {
                 <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => fmt(v)} />
                 <Tooltip formatter={(v: number, name: string) => [`Rp ${fmt(v)}`, name]} />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Area type="monotone" dataKey="revenue" stroke="#3b82f6" strokeWidth={2} fill="url(#colorRev)" dot={false} name="Penjualan" />
+                <Area type="monotone" dataKey="total_price" stroke="#8b5cf6" strokeWidth={2} fill="url(#colorPrice)" dot={false} name="Total Harga Booking" />
+                <Area type="monotone" dataKey="revenue" stroke="#3b82f6" strokeWidth={2} fill="url(#colorRev)" dot={false} name="Total Pembayaran" />
                 <Area type="monotone" dataKey="ad_spend" stroke="#ef4444" strokeWidth={2} fill="url(#colorSpend)" dot={false} name="Spend Meta Ads" />
               </AreaChart>
             </ResponsiveContainer>

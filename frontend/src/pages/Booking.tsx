@@ -18,7 +18,7 @@ import { getDateRange, fmtISODate, type Period } from '../utils/dateRange'
 import { useCanEdit } from '../hooks/useCanEdit'
 import { useAuthStore } from '../store/auth'
 import {
-  getBookings, getBookingSummary, createBooking, updateBooking,
+  getBookings, getBookingSummary, createBooking, updateBooking, updateLead,
   getUsers, getProducts, getCountries, getPayments, addPayment, deletePayment,
 } from '../services/api'
 import type { Booking, BookingSummary, User, Product, Country, BookingPayment } from '../types'
@@ -273,7 +273,14 @@ export default function BookingPage() {
                   <td className="px-3 py-3">
                     <span className="font-semibold text-blue-600">{b.booking_no}</span>
                   </td>
-                  <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{fmtDate(b.lead?.date_received)}</td>
+                  <td className="px-3 py-3 text-gray-600 whitespace-nowrap">
+                    <EditableCell
+                      value={b.lead?.date_received ? b.lead.date_received.slice(0, 10) : ''}
+                      type="date"
+                      onSave={(v) => updateLead(b.lead!.id, { date_received: v || null }).then(loadData)}
+                      disabled={!canEdit || !b.lead}
+                    />
+                  </td>
                   <td className="px-3 py-3 text-gray-600 whitespace-nowrap">
                     <EditableCell
                       value={b.booking_date ? b.booking_date.slice(0, 10) : ''}

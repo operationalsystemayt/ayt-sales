@@ -44,7 +44,7 @@ func leadListFilters(c *gin.Context, q *gorm.DB) *gorm.DB {
 
 func GetLeads(c *gin.Context) {
 	var leads []models.Lead
-	q := leadListFilters(c, database.DB.
+	base := database.DB.
 		Preload("Customer").
 		Preload("Sales").
 		Preload("Source").
@@ -53,9 +53,15 @@ func GetLeads(c *gin.Context) {
 		Preload("Status").
 		Preload("Result").
 		Preload("Product.Countries").
-		Preload("Group").
-		Where("is_converted = false")).
-		Order("updated_at DESC")
+		Preload("Group")
+	// Default view (no explicit Hasil filter) hides leads that have left the active
+	// pipeline. But if the user explicitly filters by result_id (e.g. Converted or
+	// Loss), show matching leads regardless of is_converted — otherwise a lead that
+	// converted could never be found again through this filter.
+	if c.Query("result_id") == "" {
+		base = base.Where("is_converted = false")
+	}
+	q := leadListFilters(c, base).Order("updated_at DESC")
 
 	q.Find(&leads)
 
@@ -70,49 +76,63 @@ func GetLeads(c *gin.Context) {
 }
 
 // GetLeadsSummary powers the Leads & Prospects summary cards. total_leads counts every
-// lead matching the current filters (including already-converted ones, since Convert/Cancel
-// are outcomes of the funnel); the pipeline-state buckets (Need Response/Waiting/Dormant)
-// are further scoped to is_converted = false since a converted lead has left the pipeline.
+// lead matching the current filters (including already-converted ones, since Convert/Close
+// are outcomes of the funnel); the other buckets apply their own quality/result/status
+// criteria on top of the same filter set.
 func GetLeadsSummary(c *gin.Context) {
+	var coldQ, warmQ, hotQ models.MasterQuality
+	database.DB.Where("name = ?", "Cold").First(&coldQ)
+	database.DB.Where("name = ?", "Warm").First(&warmQ)
+	database.DB.Where("name = ?", "Hot").First(&hotQ)
+
+	var convertedR, lossR, closeR models.MasterResult
+	database.DB.Where("name = ?", "Converted").First(&convertedR)
+	database.DB.Where("name = ?", "Loss").First(&lossR)
+	database.DB.Where("name = ?", "Close").First(&closeR)
+
+	_, _, _, closeStatusID := statusIDsByName()
+
+	countWhere := func(query string, args ...interface{}) int64 {
+		var n int64
+		leadListFilters(c, database.DB.Model(&models.Lead{})).Where(query, args...).Count(&n)
+		return n
+	}
+	sumWhere := func(column, query string, args ...interface{}) float64 {
+		var sum struct{ Sum float64 }
+		leadListFilters(c, database.DB.Model(&models.Lead{})).Where(query, args...).
+			Select("COALESCE(SUM(" + column + "), 0) as sum").Scan(&sum)
+		return sum.Sum
+	}
+
 	var totalLeads int64
 	leadListFilters(c, database.DB.Model(&models.Lead{})).Count(&totalLeads)
 
-	countByResult := func(name string) int64 {
-		var n int64
-		leadListFilters(c, database.DB.Model(&models.Lead{})).
-			Joins("JOIN master_results ON master_results.id = leads.result_id").
-			Where("master_results.name = ?", name).Count(&n)
-		return n
-	}
-	countByStatus := func(name string) int64 {
-		var n int64
-		leadListFilters(c, database.DB.Model(&models.Lead{})).
-			Where("is_converted = false").
-			Joins("JOIN master_statuses ON master_statuses.id = leads.status_id").
-			Where("master_statuses.name = ?", name).Count(&n)
-		return n
-	}
+	totalCold := countWhere("quality_id = ?", coldQ.ID)
+	totalWarm := countWhere("quality_id = ?", warmQ.ID)
 
-	convert := countByResult("Converted")
-	cancel := countByResult("Cancel")
-	needResponse := countByStatus("Need Response")
-	waitingCustomer := countByStatus("Waiting Customer")
-	dormant := countByStatus("Dormant")
+	hotCount := countWhere("quality_id = ?", hotQ.ID)
+	hotPax := sumWhere("pax", "quality_id = ?", hotQ.ID)
+	hotPrice := sumWhere("total_price", "quality_id = ?", hotQ.ID)
 
-	pct := func(n int64) float64 {
-		if totalLeads == 0 {
-			return 0
-		}
-		return float64(n) / float64(totalLeads) * 100
-	}
+	totalConvert := countWhere("result_id = ?", convertedR.ID)
+
+	// Loss: a Hot lead that went cold (auto-decayed or manually set to Close), OR
+	// any lead explicitly marked Loss regardless of quality.
+	lossQuery := "(quality_id = ? AND status_id = ?) OR result_id = ?"
+	lossCount := countWhere(lossQuery, hotQ.ID, closeStatusID, lossR.ID)
+	lossPax := sumWhere("pax", lossQuery, hotQ.ID, closeStatusID, lossR.ID)
+	lossPrice := sumWhere("total_price", lossQuery, hotQ.ID, closeStatusID, lossR.ID)
+
+	closeCount := countWhere("result_id = ? OR status_id = ?", closeR.ID, closeStatusID)
 
 	c.JSON(http.StatusOK, gin.H{
-		"total_leads":      totalLeads,
-		"convert":          gin.H{"count": convert, "pct": pct(convert)},
-		"cancel":           gin.H{"count": cancel, "pct": pct(cancel)},
-		"need_response":    gin.H{"count": needResponse, "pct": pct(needResponse)},
-		"waiting_customer": gin.H{"count": waitingCustomer, "pct": pct(waitingCustomer)},
-		"dormant":          gin.H{"count": dormant, "pct": pct(dormant)},
+		"total_leads":   totalLeads,
+		"total_cold":    totalCold,
+		"total_warm":    totalWarm,
+		"hot":           gin.H{"count": hotCount, "pax": hotPax, "total_price": hotPrice},
+		"total_convert": totalConvert,
+		"loss":          gin.H{"count": lossCount, "pax": lossPax, "total_price": lossPrice},
+		"close":         gin.H{"count": closeCount},
 	})
 }
 
@@ -290,18 +310,19 @@ func CreateLead(c *gin.Context) {
 }
 
 type UpdateLeadRequest struct {
-	SalesID   *string  `json:"sales_id"`
-	SourceID  *uint    `json:"source_id"`
-	InputID   *uint    `json:"input_id"`
-	QualityID *uint    `json:"quality_id"`
-	StatusID  *uint    `json:"status_id"`
-	ResultID  *uint    `json:"result_id"`
-	ProductID *uint    `json:"product_id"`
-	GroupID   *uint    `json:"group_id"`
-	Price     *float64 `json:"price"`
-	Pax       *int     `json:"pax"`
-	DealDate  *string  `json:"deal_date"`
-	Notes     *string  `json:"notes"`
+	SalesID      *string  `json:"sales_id"`
+	SourceID     *uint    `json:"source_id"`
+	InputID      *uint    `json:"input_id"`
+	QualityID    *uint    `json:"quality_id"`
+	StatusID     *uint    `json:"status_id"`
+	ResultID     *uint    `json:"result_id"`
+	ProductID    *uint    `json:"product_id"`
+	GroupID      *uint    `json:"group_id"`
+	Price        *float64 `json:"price"`
+	Pax          *int     `json:"pax"`
+	DateReceived *string  `json:"date_received"`
+	DealDate     *string  `json:"deal_date"`
+	Notes        *string  `json:"notes"`
 }
 
 func UpdateLead(c *gin.Context) {
@@ -403,6 +424,12 @@ func UpdateLead(c *gin.Context) {
 	}
 	if req.Pax != nil {
 		updates["pax"] = req.Pax
+	}
+	if req.DateReceived != nil && *req.DateReceived != "" {
+		t, err := time.Parse("2006-01-02", *req.DateReceived)
+		if err == nil {
+			updates["date_received"] = t
+		}
 	}
 	if req.DealDate != nil && *req.DealDate != "" {
 		t, err := time.Parse("2006-01-02", *req.DealDate)
@@ -608,6 +635,8 @@ func ConvertLeadToBooking(c *gin.Context) {
 	// Mark lead as converted
 	var convertedResult models.MasterResult
 	database.DB.Where("name = ?", "Converted").First(&convertedResult)
+	var hotQuality models.MasterQuality
+	database.DB.Where("name = ?", "Hot").First(&hotQuality)
 
 	leadUpdates := map[string]interface{}{
 		"is_converted": true,
@@ -615,6 +644,9 @@ func ConvertLeadToBooking(c *gin.Context) {
 	}
 	if convertedResult.ID != 0 {
 		leadUpdates["result_id"] = convertedResult.ID
+	}
+	if hotQuality.ID != 0 {
+		leadUpdates["quality_id"] = hotQuality.ID
 	}
 	if req.DealDate != nil && *req.DealDate != "" {
 		if dd, err := time.Parse("2006-01-02", *req.DealDate); err == nil {

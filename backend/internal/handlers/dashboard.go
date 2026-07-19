@@ -156,14 +156,17 @@ func GetDashboardChart(c *gin.Context) {
 		Leads            int64   `json:"leads"`
 		Closing          int64   `json:"closing"`
 		Revenue          float64 `json:"revenue"`
+		TotalPrice       float64 `json:"total_price"`
 		AdSpend          float64 `json:"ad_spend"`
 		AdsConversations int64   `json:"ads_conversations"`
 	}
 
 	// Leads = sum of pax across leads received that day (a lead with pax unset/0 counts
-	// as 1 person). Closing = sum of pax across bookings made that day. AdSpend/
-	// AdsConversations come from ad_insights, synced separately from the Meta
-	// Marketing API (see SyncAdInsights) — 0 for any day not yet synced.
+	// as 1 person). Closing = sum of pax across bookings made that day. Revenue is what's
+	// actually been paid (total_paid); TotalPrice is the full booking value regardless of
+	// payment status — both scoped to bookings made that day. AdSpend/AdsConversations
+	// come from ad_insights, synced separately from the Meta Marketing API (see
+	// SyncAdInsights) — 0 for any day not yet synced.
 	rows := make([]ChartRow, 0)
 	database.DB.Raw(`
 		SELECT
@@ -171,6 +174,7 @@ func GetDashboardChart(c *gin.Context) {
 			COALESCE((SELECT SUM(GREATEST(COALESCE(l.pax, 0), 1)) FROM leads l WHERE DATE(l.date_received) = gs.day AND l.deleted_at IS NULL), 0) as leads,
 			COALESCE((SELECT SUM(b.pax) FROM bookings b WHERE DATE(b.booking_date) = gs.day AND b.deleted_at IS NULL), 0) as closing,
 			COALESCE((SELECT SUM(b2.total_paid) FROM bookings b2 WHERE DATE(b2.booking_date) = gs.day AND b2.deleted_at IS NULL), 0) as revenue,
+			COALESCE((SELECT SUM(b3.total_price) FROM bookings b3 WHERE DATE(b3.booking_date) = gs.day AND b3.deleted_at IS NULL), 0) as total_price,
 			COALESCE((SELECT ai.spend FROM ad_insights ai WHERE ai.date = gs.day), 0) as ad_spend,
 			COALESCE((SELECT ai.conversations FROM ad_insights ai WHERE ai.date = gs.day), 0) as ads_conversations
 		FROM generate_series(?::date, ?::date, '1 day'::interval) AS gs(day)

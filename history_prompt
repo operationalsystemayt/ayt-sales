@@ -782,11 +782,14 @@ Generated credentials ready to copy
   META_ACCESS_TOKEN=EAAxxxxxxxxxxxxxxxxxxxxxxxxxx
 
   Sebelum ditaruh di .env, test dulu tokennya biar nggak salah-salah restart server:
-  curl -G "https://graph.facebook.com/v20.0/act_1234567890123/insights" \
+  curl -G "https://graph.facebook.com/v20.0/act_1154530638463811/insights" \
     -d "fields=spend,impressions,clicks,actions,date_start" \
     -d "time_range={'since':'2026-07-10','until':'2026-07-17'}" \
     -d "time_increment=1" \
-    -d "access_token=EAAxxxxxxxx..."
+    -d "access_token=EAAT36N36AfwBRweE7QQWF8K8YBoNkMvhAzFcgZAikvwpYZAsWyKPZAPosLwxV0ynYZBoKNNS7OWPhq7d74RqZBX4KyzsJ2ZBr2PSsfUXJLTGEZCuaD2BGQfG8Yg4bkBrFqYXLp03SG4tZBMEKruZAKPP5TQxGPLmJeVOld0DtZCGsSM6noZB08y0BTEVHedCWF2q8QfzwZDZD"
+  
+  {"data":[{"spend":"0","impressions":"0","clicks":"0","actions":[{"action_type":"onsite_conversion.messaging_user_depth_5_message_send","value":"18"}],"date_start":"2026-07-10","date_stop":"2026-07-10"},{"spend":"103096","impressions":"1510","clicks":"55","actions":[{"action_type":"link_click","value":"16"},{"action_type":"post_reaction","value":"7"},{"action_type":"landing_page_view","value":"1"},{"action_type":"omni_landing_page_view","value":"1"},{"action_type":"onsite_conversion.total_messaging_connection","value":"13"},{"action_type":"post_engagement","value":"468"},{"action_type":"post_interaction_gross","value":"16"},{"action_type":"comment","value":"3"},{"action_type":"page_engagement","value":"468"},{"action_type":"post_interaction_net","value":"16"},{"action_type":"onsite_conversion.messaging_user_depth_2_message_send","value":"6"},{"action_type":"onsite_conversion.messaging_first_reply","value":"12"},{"action_type":"post","value":"1"},{"action_type":"onsite_conversion.post_save","value":"5"},{"action_type":"onsite_conversion.post_net_comment","value":"3"},{"action_type":"onsite_conversion.messaging_user_depth_3_message_send","value":"4"},{"action_type":"onsite_conversion.post_net_save","value":"5"},{"action_type":"onsite_conversion.post_net_like","value":"7"},{"action_type":"onsite_conversion.messaging_user_depth_5_message_send","value":"3"},{"action_type":"onsite_conversion.messaging_conversation_started_7d","value":"12"},{"action_type":"video_view","value":"436"}],"date_start":"2026-07-14","date_stop":"2026-07-14"},{"spend":"150059","impressions":"2491","clicks":"76","actions":[{"action_type":"link_click","value":"24"},{"action_type":"post_reaction","value":"15"},{"action_type":"onsite_conversion.messaging_conversation_replied_7d","value":"1"},{"action_type":"onsite_conversion.total_messaging_connection","value":"18"},{"action_type":"onsite_conversion.post_unlike","value":"1"},{"action_type":"post_engagement","value":"811"},{"action_type":"post_interaction_gross","value":"26"},{"action_type":"comment","value":"3"},{"action_type":"page_engagement","value":"811"},{"action_type":"post_interaction_net","value":"27"},{"action_type":"onsite_conversion.messaging_user_depth_2_message_send","value":"16"},{"action_type":"onsite_conversion.messaging_first_reply","value":"17"},{"action_type":"post","value":"5"},{"action_type":"onsite_conversion.post_save","value":"3"},{"action_type":"onsite_conversion.post_net_comment","value":"3"},{"action_type":"onsite_conversion.messaging_user_depth_3_message_send","value":"16"},{"action_type":"onsite_conversion.post_net_save","value":"3"},{"action_type":"onsite_conversion.post_net_like","value":"14"},{"action_type":"onsite_conversion.messaging_user_depth_5_message_send","value":"21"},{"action_type":"onsite_conversion.messaging_conversation_started_7d","value":"18"},{"action_type":"video_view","value":"761"}],"date_start":"2026-07-15","date_stop":"2026-07-15"},{"spend":"157327","impressions":"2564","clicks":"105","actions":[{"action_type":"link_click","value":"34"},{"action_type":"post_reaction","value":"17"},{"action_type":"onsite_conversion.messaging_conversation_replied_7d","value":"5"},{"action_type":"landing_page_view","value":"1"},{"action_type":"omni_landing_page_view","value":"1"},{"action_type":"onsite_conversion.total_messaging_connection","value":"25"},{"action_type":"post_engagement","value":"894"},{"action_type":"post_interaction_gross","value":"27"},{"action_type":"comment","value":"4"},{"action_type":"page_engagement","value":"894"},{"action_type":"post_interaction_net","value":"27"},{"action_type":"onsite_conversion.messaging_user_depth_2_message_send","value":"15"},{"action_type":"onsite_conversion.messaging_first_reply","value":"21"},{"action_type":"post","value":"3"},{"action_type":"onsite_conversion.post_save","value":"3"},{"action_type":"onsite_conversion.post_net_comment","value":"4"},{"action_type":"onsite_conversion.messaging_user_depth_3_message_send","value":"12"},{"action_type":"onsite_conversion.post_net_save","value":"3"},{"action_type":"onsite_conversion.post_net_like","value":"17"},{"action_type":"onsite_conversion.messaging_user_depth_5_message_send","value":"19"},{"action_type":"onsite_conversion.messaging_conversation_started_7d","value":"26"},{"action_type":"video_view","value":"833"}],"date_start":"2026-07-16","date_stop":"2026-07-16"},{"spend":"148187","impressions":"2704","clicks":"82","actions":[{"action_type":"link_click","value":"24"},{"action_type":"post_reaction","value":"18"},{"action_type":"onsite_conversion.messaging_conversation_replied_7d","value":"3"},{"action_type":"onsite_conversion.total_messaging_connection","value":"26"},{"action_type":"post_engagement","value":"844"},{"action_type":"post_interaction_gross","value":"27"},{"action_type":"page_engagement","value":"844"},{"action_type":"post_interaction_net","value":"27"},{"action_type":"onsite_conversion.messaging_user_depth_2_message_send","value":"11"},{"action_type":"onsite_conversion.messaging_first_reply","value":"21"},{"action_type":"post","value":"7"},{"action_type":"onsite_conversion.post_save","value":"2"},{"action_type":"onsite_conversion.messaging_user_depth_3_message_send","value":"11"},{"action_type":"onsite_conversion.post_net_save","value":"2"},{"action_type":"onsite_conversion.post_net_like","value":"18"},{"action_type":"onsite_conversion.messaging_user_depth_5_message_send","value":"17"},{"action_type":"onsite_conversion.messaging_conversation_started_7d","value":"23"},{"action_type":"video_view","value":"793"}],"date_start":"2026-07-17","date_stop":"2026-07-17"}],"paging":{"cursors":{"before":"MAZDZD","after":"NAZDZD"}}}
+  
   Kalau hasilnya JSON data (bukan {"error":...}), berarti token & ad account ID sudah benar dan siap dipakai untuk tombol "Sync Meta Ads" di dashboard.
 
   Kalau nanti muncul error izin ("does not have permission for this ad account" atau semacamnya), berarti langkah (b) assign system user ke ad account belum kena — cek lagi role-nya di sana.
@@ -1263,7 +1266,7 @@ Generated credentials ready to copy
   4. Clone & .env
 
   sudo mkdir -p /var/www/ayt-sales && sudo chown $USER /var/www/ayt-sales
-  cd /var/www/ayt-sales && git clone <url-repo-kamu> .
+  cd /var/www/ayt-sales && git clone https://github.com/operationalsystemayt/ayt-sales .
   cd backend
   cat > .env <<EOF
   DB_HOST=localhost
@@ -1273,10 +1276,10 @@ Generated credentials ready to copy
   DB_PORT=5432
   JWT_SECRET=$(openssl rand -hex 32)
   PORT=8080
-  WEBHOOK_SECRET=<WEBHOOK_SECRET dari Step 0>
+  WEBHOOK_SECRET=a1fe56bc33e9dfb1ce6ce1a8e63af6110013a05cca1041bb
   WAHA_BASE_URL=http://10.150.74.5:3000
-  WAHA_API_KEY=<WAHA_API_KEY dari VPS-B ~/waha-credentials.txt>
-  WAHA_SESSION=62821
+  WAHA_API_KEY=e3af51043f031366b08bdc4e7c913eb7
+  WAHA_SESSION=6282220056883
   EOF
   cat .env
 
@@ -1295,10 +1298,11 @@ Generated credentials ready to copy
   Type=simple
   User=www-data
   WorkingDirectory=/var/www/ayt-sales/backend
+  ExecStart=/var/www/ayt-sales/backend/ayt-backend
   Restart=always
   RestartSec=5
   Environment=GIN_MODE=release
-  
+
   [Install]
   WantedBy=multi-user.target
   EOF
@@ -1427,6 +1431,9 @@ Generated credentials ready to copy
   npm install
   npm run build
 
+-------- bagian ini di update dulu jadi yg V3 ----------------
+
+
   7. Nginx + HTTPS
   sudo tee /etc/nginx/sites-available/ayt-sales > /dev/null <<'EOF'
   server {
@@ -1523,3 +1530,310 @@ Generated credentials ready to copy
   # VPS-B (kalau ada update image WAHA)
   cd /opt/waha && docker compose pull && docker compose up -d
                                                                                               /rc active
+
+
+------------- DEPLOY V3 -----------
+⏺ Pushed. Sekarang lengkap step-by-step untuk beresin situasi kamu — 2 domain terpisah di 1 VPS-A:
+
+  1. Domainesia — DNS
+
+  Buka DNS management domain kamu di Domainesia, tambahkan A record untuk kedua domain, arahkan ke public IP VPS-A (103.171.84.157):
+  - aytsales.web.id → 103.171.84.157
+  - aytsalessys.web.id → 103.171.84.157
+
+  Tunggu propagasi (biasanya beberapa menit sampai 1 jam). Cek dengan:
+  dig +short aytsales.web.id
+  dig +short aytsalessys.web.id
+  Harus muncul 103.171.84.157 untuk keduanya sebelum lanjut ke Nginx/certbot.
+
+  2. VPS-A — pull kode terbaru & set FRONTEND_ORIGIN
+
+⏺ Bash(true)
+  ⎿  (No output)
+sudo chown -R aytsales:aytsales /var/www/ayt-sales
+⏺ cd /var/www/ayt-sales && git pull
+  cd backend
+  nano .env   # tambahkan baris ini di paling bawah:
+  FRONTEND_ORIGIN=http://aytsales.web.id
+  go build -o ayt-backend ./cmd/server
+  sudo systemctl restart ayt-backend
+  sudo journalctl -u ayt-backend -f   # pastikan "Server running on :8080" lagi, Ctrl+C
+
+  3. Build ulang frontend dengan VITE_API_URL mengarah ke domain backend
+
+  cd /var/www/ayt-sales/frontend
+  cat > .env.production <<EOF
+  VITE_API_URL=http://aytsalessys.web.id/api
+  EOF
+  npm install
+  npm run build
+
+  4. Nginx — dua server block terpisah
+
+  Backend (aytsalessys.web.id → proxy ke Go, semua path karena route Go sudah punya prefix /api sendiri):
+  sudo tee /etc/nginx/sites-available/aytsalessys > /dev/null <<'EOF'
+  server {
+      listen 80;
+      server_name aytsalessys.web.id;
+      
+      location / {
+          proxy_pass http://127.0.0.1:8080;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_read_timeout 60s;
+      }
+  }
+  EOF
+
+  Frontend (aytsales.web.id → static files, tidak perlu proxy /api lagi karena sekarang API call langsung ke domain backend):
+  sudo tee /etc/nginx/sites-available/aytsales > /dev/null <<'EOF'
+  server {
+      listen 80;
+      server_name aytsales.web.id;
+
+      root /var/www/ayt-sales/frontend/dist;
+      index index.html;
+      
+      location / {
+          try_files $uri $uri/ /index.html;
+      }
+  }
+  EOF
+
+  Aktifkan keduanya & hapus symlink lama (kalau kamu masih punya ayt-sales dari rencana 1-domain sebelumnya):
+  sudo rm -f /etc/nginx/sites-enabled/ayt-sales
+  sudo ln -sf /etc/nginx/sites-available/aytsalessys /etc/nginx/sites-enabled/
+  sudo ln -sf /etc/nginx/sites-available/aytsales /etc/nginx/sites-enabled/
+  sudo nginx -t
+  sudo systemctl reload nginx
+  Selalu cat file yang baru dibuat sebelum lanjut — cek 2 file di atas persis seperti yang saya kasih, mengingat kejadian baris kepotong sebelumnya:
+  cat /etc/nginx/sites-available/aytsalessys
+  cat /etc/nginx/sites-available/aytsales
+
+  5. SSL untuk kedua domain
+  sudo apt update
+  sudo apt install -y certbot python3-certbot-nginx
+  sudo certbot --nginx -d aytsales.web.id -d aytsalessys.web.id
+  Certbot otomatis update kedua Nginx config di atas jadi HTTPS + redirect. Setelah ini, update lagi 2 tempat yang tadi pakai http:// ke https://:
+  # frontend/.env.production
+  VITE_API_URL=https://aytsalessys.web.id/api
+  # lalu: npm run build (ulang)
+
+  # backend/.env
+  FRONTEND_ORIGIN=https://aytsales.web.id
+  # lalu: sudo systemctl restart ayt-backend
+
+  6. Verifikasi
+
+  1. Buka https://aytsales.web.id → harus muncul halaman login CRM.
+  2. Login → buka DevTools Network tab, pastikan request ke https://aytsalessys.web.id/api/... sukses (bukan CORS error).
+  3. curl https://aytsalessys.web.id/api/auth/login -X POST -H "Content-Type: application/json" -d '{"email":"admin@ayt.com","password":"admin123"}' → harus balas
+  token, bukan error koneksi.
+
+  Kabari kalau ada error di langkah mana pun.
+
+----- CARA PENDAFTARAN SALES ke WAHA API (WhatsApp free) -----
+
+  Step 1 — Siapkan variabel yang dibutuhkan (di VPS-B)
+
+  cd /opt/waha
+  export WAHA_KEY=$(grep WAHA_API_KEY ~/waha-credentials.txt | cut -d= -f2)
+  echo $WAHA_KEY   # pastikan tidak kosong
+
+  Ambil WEBHOOK_SECRET dari VPS-A (kalau belum hafal):
+  # di VPS-A
+  grep WEBHOOK_SECRET /var/www/ayt-sales/backend/.env
+  Catat nilainya, dipakai di step berikutnya. Sebut <WEBHOOK_SECRET> di bawah ini, ganti dengan nilai asli.
+
+  Step 2 — Buat 3 session, nama session = nomor WhatsApp-nya
+
+  Supaya gampang dicocokkan ke field "WAHA session" tiap sales di CRM nanti, pakai nomor asli sebagai nama session:
+
+  WEBHOOK_SECRET="<WEBHOOK_SECRET dari VPS-A>"
+
+  for SESSION in 6282220056881 6282220056882 6282220056884; do
+    curl -X POST http://10.150.74.5:3000/api/sessions \
+      -H "Content-Type: application/json" -H "X-Api-Key: $WAHA_KEY" \
+      -d "{
+        \"name\": \"$SESSION\",
+        \"config\": {
+          \"webhooks\": [{
+            \"url\": \"https://aytsalessys.web.id/api/webhooks/waha\",
+            \"events\": [\"message\"],
+            \"customHeaders\": [{ \"name\": \"X-Webhook-Secret\", \"value\": \"$WEBHOOK_SECRET\" }]
+          }]
+        }
+      }"
+    echo
+  done
+
+  Cek ketiganya sudah kebuat:
+  curl -H "X-Api-Key: $WAHA_KEY" http://10.150.74.5:3000/api/sessions
+  Statusnya masih STOPPED atau SCAN_QR_CODE — belum tersambung ke nomor, itu wajar di titik ini.
+
+  Step 3 — Hubungkan tiap session ke nomor fisiknya (pairing code)
+
+  Jalankan satu-satu, tiap nomor butuh kode pairing sendiri. Siapkan HP yang sesuai nomor di tangan sebelum request kode (kode cuma berlaku beberapa menit).
+
+  Raya — 6282220056881:
+  curl -X POST http://10.150.74.5:3000/api/6282220056881/auth/request-code \
+    -H "Content-Type: application/json" -H "X-Api-Key: $WAHA_KEY" \
+    -d '{"phoneNumber": "6282220056881"}'
+  Dapat respons {"code": "ABCD-ABCD"} → di HP nomor 6282220056881: WhatsApp → Linked Devices → Link a Device → Link with phone number instead → masukkan kode itu.
+
+  Jean — 6282220056882:
+  curl -X POST http://10.150.74.5:3000/api/6282220056882/auth/request-code \
+    -H "Content-Type: application/json" -H "X-Api-Key: $WAHA_KEY" \
+    -d '{"phoneNumber": "6282220056882"}'
+  Ulangi proses link di HP nomor 6282220056882.
+
+  Jevry — 6282220056884:
+  curl -X POST http://10.150.74.5:3000/api/6282220056884/auth/request-code \
+    -H "Content-Type: application/json" -H "X-Api-Key: $WAHA_KEY" \
+    -d '{"phoneNumber": "6282220056884"}'
+  Ulangi proses link di HP nomor 6282220056884.
+
+  Verifikasi ketiganya WORKING:
+  curl -H "X-Api-Key: $WAHA_KEY" http://10.150.74.5:3000/api/sessions
+  Ulangi cek ini sampai status ketiga session jadi WORKING (kadang butuh beberapa detik setelah link di HP).
+
+  Step 4 — Mapping session ke sales user di CRM (browser)
+
+  1. Login sebagai admin di https://aytsales.web.id.
+
+  Jevry — 6282220056884:
+  curl -X POST http://10.150.74.5:3000/api/6282220056884/auth/request-code \
+    -H "Content-Type: application/json" -H "X-Api-Key: $WAHA_KEY" \
+    -d '{"phoneNumber": "6282220056884"}'
+  Ulangi proses link di HP nomor 6282220056884.
+
+  Verifikasi ketiganya WORKING:
+  curl -H "X-Api-Key: $WAHA_KEY" http://10.150.74.5:3000/api/sessions
+  Ulangi cek ini sampai status ketiga session jadi WORKING (kadang butuh beberapa detik setelah link di HP).
+
+  Step 4 — Mapping session ke sales user di CRM (browser)
+
+  1. Login sebagai admin di https://aytsales.web.id.
+  2. Pengaturan → Kelola User.
+  3. Klik ikon edit (pensil) di baris Raya → isi field WAHA session = 6282220056881 → Simpan.
+  4. Klik edit di baris Jean → WAHA session = 6282220056882 → Simpan.
+  5. Klik edit di baris Jevry → WAHA session = 6282220056884 → Simpan.
+  6. Cek lagi daftar user — tiap baris sekarang harusnya menampilkan · WA: 628222... di bawah email masing-masing.
+
+  Step 5 — Verifikasi end-to-end
+
+  1. Dari HP lain, kirim WhatsApp ke 6282220056881 → cek lead baru muncul di CRM (Leads & Prospects) dengan kolom Sales = Raya, otomatis.
+  2. Ulangi kirim ke 6282220056882 → lead baru harus ter-assign ke Jean.
+  3. Ulangi kirim ke 6282220056884 → lead baru harus ter-assign ke Jevry.
+  4. Buka tab Chat di CRM, balas salah satu — pastikan balasannya keluar dari nomor yang sesuai (bukan tertukar).
+  5. Kalau ada yang tidak ter-assign / masuk semua ke satu sales / tidak masuk sama sekali, cek log:
+  # VPS-A
+  sudo journalctl -u ayt-backend -f
+  # VPS-B
+  cd /opt/waha && docker compose logs -f
+  dan pastikan waha_session di Settings CRM persis sama (termasuk tanpa spasi) dengan nama session di WAHA (6282220056881 dst).
+
+--------------------------------------------------
+
+  Ini rincian Grafik Penjualan di Dashboard, per hari, sumbernya dua tabel berbeda:
+
+  Datanya dari mana
+
+  Sisi "Penjualan" (revenue) — dari tabel bookings di database CRM sendiri:
+  SUM(b.total_paid) WHERE booking_date = hari itu
+  Yaitu total uang yang benar-benar sudah dibayar customer atas booking yang dibuat pada hari itu (bukan total harga booking, tapi yang sudah masuk sebagai
+  pembayaran).
+
+  Sisi "Spend Meta Ads" (ad_spend) — dari tabel ad_insights, yang bukan data real-time — ini hasil sync manual dari Meta Marketing API lewat tombol "Sync Meta Ads"
+  di Dashboard (yang kita bangun waktu awal obrolan ini). Setiap kali tombol itu ditekan, backend narik spend harian dari Meta Ads Manager (akun yang diisi di
+  META_AD_ACCOUNT_ID/META_ACCESS_TOKEN) dan simpan per tanggal.
+
+  Apa yang dibanding
+
+  Dua area chart ditumpuk di sumbu waktu yang sama: berapa yang dikeluarkan untuk iklan hari itu vs berapa yang benar-benar masuk sebagai pembayaran booking hari 
+  itu. Tujuannya biar kelihatan pola kasarnya — hari-hari spend tinggi apakah diikuti kenaikan revenue (dengan jeda beberapa hari, karena orang klik iklan → chat →
+  jadi lead → baru closing, nggak instan).
+
+  Ada juga chart kedua di bawahnya, "Grafik Leads & Closing", yang saya tambahkan garis ketiga "Chat dari Iklan" (ads_conversations — jumlah orang yang mulai chat
+  WhatsApp dari iklan Meta, dilaporkan Meta sendiri) berdampingan dengan Leads (jumlah lead yang benar-benar tercatat di CRM) dan Closing. Ini funnel 3 tahap: orang
+  klik iklan → masuk sebagai lead di CRM → jadi closing.
+
+  Plus 2 KPI card yang muncul otomatis kalau sudah ada data spend: Cost per Lead (total spend ÷ total chat dari iklan) dan ROAS (total revenue ÷ total spend).
+
+  Keterbatasan yang perlu kamu tahu
+
+  - Bukan atribusi per-lead — sistem ini nggak tahu booking mana yang persis berasal dari campaign iklan mana. Ini level "korelasi harian kasar", bukan "lead X
+  datang dari iklan Y". Kalau mau presisi sampai level campaign, perlu tracking tambahan (UTM/campaign_id per lead) yang belum dibangun.
+  - Data spend nggak otomatis update — cuma ke-refresh kalau kamu klik "Sync Meta Ads" secara manual. Belum ada cron/scheduler yang narik otomatis tiap hari.
+  - Chart-nya bakal kosong/flat di garis spend sampai kamu isi META_AD_ACCOUNT_ID dan META_ACCESS_TOKEN di .env VPS-A (waktu itu kamu bilang mau dilengkapi
+  belakangan) — sudah diisi belum, atau masih pending?
+
+  Request yang dikirim ke Meta
+
+  GET https://graph.facebook.com/v20.0/{META_AD_ACCOUNT_ID}/insights
+      ?fields=spend,impressions,clicks,actions,date_start
+      &time_range={"since":"...","until":"..."}
+      &time_increment=1
+
+  Response yang dipakai
+
+  Meta balas array data, tiap elemen mewakili 1 hari (karena time_increment=1), bentuknya kira-kira:
+  {
+    "data": [
+      {
+        "spend": "125000",
+        "impressions": "3400",
+        "clicks": "210",
+        "actions": [
+          { "action_type": "onsite_conversion.messaging_conversation_started_7d", "value": "18" },
+          { "action_type": "link_click", "value": "195" },
+          ...
+        ],
+        "date_start": "2026-07-15",
+        "date_stop": "2026-07-15"
+      }
+    ]
+  }
+
+  Field yang benar-benar diambil dan disimpan ke tabel ad_insights:
+
+  ┌───────────────────────────────────────────────────────────────────────────────────┬───────────────────┬──────────────────────────────────────────────────────┐
+  │                              Field di response Meta                               │ Disimpan sebagai  │                      Baris kode                      │
+  ├───────────────────────────────────────────────────────────────────────────────────┼───────────────────┼──────────────────────────────────────────────────────┤
+  │ spend                                                                             │ ad_spend          │ insights.go:95 — strconv.ParseFloat(d.Spend, 64)     │
+  ├───────────────────────────────────────────────────────────────────────────────────┼───────────────────┼──────────────────────────────────────────────────────┤
+  │ impressions                                                                       │ impressions       │ insights.go:96                                       │
+  ├───────────────────────────────────────────────────────────────────────────────────┼───────────────────┼──────────────────────────────────────────────────────┤
+  │ clicks                                                                            │ clicks            │ insights.go:97                                       │
+  ├───────────────────────────────────────────────────────────────────────────────────┼───────────────────┼──────────────────────────────────────────────────────┤
+  │ actions[].value di mana action_type ==                                            │ ads_conversations │ insights.go:88-94 — loop cari action_type ini, ambil │
+  │ "onsite_conversion.messaging_conversation_started_7d"                             │                   │  value-nya                                           │
+  └───────────────────────────────────────────────────────────────────────────────────┴───────────────────┴──────────────────────────────────────────────────────┘
+  
+  spend di Meta itu total biaya iklan campaign/ad account pada hari itu — dalam mata uang akun iklan kamu (kemungkinan IDR kalau ad account-nya di-set Rupiah, tapi
+  cek lagi di Ads Manager kamu untuk pastikan, karena kode ini nggak melakukan konversi currency apa pun, langsung dianggap angka final).
+
+  Catatan penting yang belum sempat diverifikasi (sudah saya tandai waktu awal bikin fitur ini): action_type untuk "chat dimulai dari iklan"
+  (onsite_conversion.messaging_conversation_started_7d) itu asumsi standar Meta untuk Click-to-WhatsApp — begitu kamu sync data pertama kali dengan token asli, cek
+  apakah angka ads_conversations yang keluar di dashboard cocok sama "Messaging conversations started" di Ads Manager. Kalau beda action_type-nya di akun kamu, kasih
+  tahu saya raw response-nya, saya sesuaikan.
+
+  CR = Conversion Rate. Keduanya dihitung dari totalLeads (jumlah lead yang masuk di periode itu) sebagai penyebut, bedanya di pembilang:
+
+  CR Pemesan = jumlah booking ÷ jumlah leads × 100%
+  Berapa persen dari lead yang masuk berhasil jadi booking (dihitung per transaksi booking, bukan per orang — 1 booking bisa aja isinya 3 pax, tetap dihitung 1
+  "pemesan").
+
+  CR Peserta = total pax dari semua booking ÷ jumlah leads × 100%
+  Berapa persen kalau dihitung per orang/pax yang ikut — jadi kalau ada 1 lead masuk terus booking 4 pax sekaligus, itu nyumbang 4 ke pembilang CR Peserta, tapi cuma
+  1 ke pembilang CR Pemesan.
+
+  Contoh biar jelas bedanya: bulan ini 100 lead masuk, closing jadi 20 booking, total pax dari 20 booking itu 55 orang (rata-rata ~2.75 pax per booking, karena
+  banyak yang pesan buat keluarga/grup).
+  - CR Pemesan = 20/100 = 20% → "20% dari lead jadi transaksi booking"
+  - CR Peserta = 55/100 = 55% → "tiap 100 lead yang masuk, setara 55 orang yang akhirnya berangkat"
+
+  CR Peserta biasanya lebih tinggi dari CR Pemesan kalau produk kamu sering dipesan grup (misal 1 booking = 4 orang keluarga) — CR Peserta di kasus itu menangkap
+  "size" dari tiap closing, sedangkan CR Pemesan cuma menangkap "berapa banyak transaksi".

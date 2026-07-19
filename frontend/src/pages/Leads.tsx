@@ -25,7 +25,6 @@ import type {
 } from '../types'
 import { format } from 'date-fns'
 
-const fmtDate = (d?: string) => d ? format(new Date(d), 'dd MMM yyyy') : '-'
 const fmtDateTime = (d?: string) => d ? format(new Date(d), 'dd MMM yyyy HH:mm') : '-'
 const fmtNum = (n?: number) => n !== undefined && n !== null ? `${(n / 1_000_000).toFixed(1).replace('.', ',')} jt` : '-'
 const BULK_FIELDS = ['source_id','quality_id','result_id','product_id','group_id','status_id','deal_date']
@@ -232,13 +231,17 @@ export default function Leads() {
     }
   }
 
-  const summaryCards = summary ? [
-    { label: 'Total Leads', count: summary.total_leads, pct: null, color: 'text-blue-600 bg-blue-50' },
-    { label: 'Convert', count: summary.convert.count, pct: summary.convert.pct, color: 'text-green-600 bg-green-50' },
-    { label: 'Cancel', count: summary.cancel.count, pct: summary.cancel.pct, color: 'text-red-600 bg-red-50' },
-    { label: 'Need Response', count: summary.need_response.count, pct: summary.need_response.pct, color: 'text-orange-600 bg-orange-50' },
-    { label: 'Waiting Customer', count: summary.waiting_customer.count, pct: summary.waiting_customer.pct, color: 'text-yellow-600 bg-yellow-50' },
-    { label: 'Dormant', count: summary.dormant.count, pct: summary.dormant.pct, color: 'text-gray-600 bg-gray-100' },
+  const simpleSummaryCards = summary ? [
+    { label: 'Total Lead', count: summary.total_leads, color: 'text-blue-600 bg-blue-50' },
+    { label: 'Total Cold', count: summary.total_cold, color: 'text-sky-600 bg-sky-50' },
+    { label: 'Total Warm', count: summary.total_warm, color: 'text-orange-600 bg-orange-50' },
+    { label: 'Total Convert', count: summary.total_convert, color: 'text-green-600 bg-green-50' },
+    { label: 'Close', count: summary.close.count, color: 'text-gray-600 bg-gray-100' },
+  ] : []
+
+  const statSummaryCards = summary ? [
+    { label: 'Hot', stat: summary.hot, color: 'text-red-600 bg-red-50' },
+    { label: 'Loss', stat: summary.loss, color: 'text-rose-700 bg-rose-50' },
   ] : []
 
   return (
@@ -249,14 +252,18 @@ export default function Leads() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-4">
-        {summaryCards.map(({ label, count, pct, color }) => (
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 mb-4">
+        {simpleSummaryCards.map(({ label, count, color }) => (
           <div key={label} className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
             <div className={`inline-flex text-xs font-medium px-2 py-0.5 rounded-full mb-2 ${color}`}>{label}</div>
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-lg font-bold text-gray-900">{count}</span>
-              {pct !== null && <span className="text-xs text-gray-400">({pct.toFixed(1)}%)</span>}
-            </div>
+            <div className="text-lg font-bold text-gray-900">{count}</div>
+          </div>
+        ))}
+        {statSummaryCards.map(({ label, stat, color }) => (
+          <div key={label} className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
+            <div className={`inline-flex text-xs font-medium px-2 py-0.5 rounded-full mb-2 ${color}`}>{label}</div>
+            <div className="text-lg font-bold text-gray-900">{stat.count}</div>
+            <div className="text-xs text-gray-400 mt-1">{stat.pax} Pax &middot; {fmtNum(stat.total_price)}</div>
           </div>
         ))}
       </div>
@@ -339,7 +346,14 @@ export default function Leads() {
                   <td className="px-3 py-3">
                     {lead.sales ? <Avatar name={lead.sales.full_name} src={lead.sales.avatar} /> : <span className="text-gray-300">-</span>}
                   </td>
-                  <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{fmtDate(lead.date_received)}</td>
+                  <td className="px-3 py-3 text-gray-600 whitespace-nowrap">
+                    <EditableCell
+                      value={lead.date_received ? lead.date_received.slice(0, 10) : ''}
+                      type="date"
+                      onSave={(v) => handleInlineUpdate(lead.id, 'date_received', v || null)}
+                      disabled={!canEdit}
+                    />
+                  </td>
                   <td className="px-3 py-3 font-medium text-gray-700">{lead.customer?.phone ?? '-'}</td>
                   <td className="px-3 py-3 font-semibold text-gray-900">
                     <EditableCell
@@ -390,7 +404,7 @@ export default function Leads() {
                       onChange={(e) => handleInlineUpdate(lead.id, 'result_id', e.target.value ? Number(e.target.value) : null)}>
                       <option value="">-</option>
                       {results.map((r) => <option key={r.id} value={r.id}
-                        className={r.name === 'Converted' ? 'text-green-600' : r.name === 'Cancel' ? 'text-red-600' : ''}>
+                        className={r.name === 'Converted' ? 'text-green-600' : r.name === 'Loss' ? 'text-red-600' : r.name === 'Close' ? 'text-gray-500' : ''}>
                         {r.name}
                       </option>)}
                     </select>

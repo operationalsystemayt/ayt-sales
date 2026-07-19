@@ -39,7 +39,7 @@ function ProductsTab() {
       ...form,
       country_ids: formCountryIds,
       duration_days: Number(form.duration_days),
-      price_per_pax: Number(form.price_per_pax) * 1_000_000,
+      price_per_pax: Number(form.price_per_pax),
     })
     setShowAdd(false)
     setForm({ product_name: '', trip_type: 'Open Trip', duration_days: '', price_per_pax: '', description: '' })
@@ -50,7 +50,7 @@ function ProductsTab() {
   const handleUpdate = async (id: number, field: string, raw: string) => {
     const val =
       field === 'duration_days' ? Number(raw) :
-      field === 'price_per_pax' ? Number(raw) * 1_000_000 :
+      field === 'price_per_pax' ? Number(raw) :
       raw
     await updateProduct(id, { [field]: val })
     load()
@@ -130,7 +130,7 @@ function ProductsTab() {
                 </td>
                 <td className="px-4 py-3">
                   <EditableCell
-                    value={String(p.price_per_pax ? p.price_per_pax / 1_000_000 : '')}
+                    value={String(p.price_per_pax ?? '')}
                     type="number"
                     onSave={(v) => handleUpdate(p.id, 'price_per_pax', v)}
                     disabled={!canEdit}
@@ -205,17 +205,14 @@ function ProductsTab() {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Harga per Pax (juta)</label>
-              <div className="relative">
-                <input
-                  type="number" min="0" step="0.1"
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2 pr-7 text-sm focus:outline-none focus:border-blue-400"
-                  placeholder="14.9"
-                  value={form.price_per_pax}
-                  onChange={(e) => setForm({ ...form, price_per_pax: e.target.value })}
-                />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">jt</span>
-              </div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Harga per Pax (Rp)</label>
+              <input
+                type="number" min="0" step="1000"
+                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+                placeholder="12500000"
+                value={form.price_per_pax}
+                onChange={(e) => setForm({ ...form, price_per_pax: e.target.value })}
+              />
             </div>
 
             <div className="col-span-2">

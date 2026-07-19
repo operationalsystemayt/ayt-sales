@@ -25,5 +25,6 @@ export const PERIODS: { key: Period; label: string }[] = [
   { key: 'today', label: 'Hari Ini' },
   { key: '7d', label: '7 Hari' },
   { key: '30d', label: '30 Hari' },
+  { key: 'month', label: 'Bulan Ini' },
   { key: 'custom', label: 'Custom' },
 ]

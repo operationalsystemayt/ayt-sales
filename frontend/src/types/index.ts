@@ -142,18 +142,20 @@ export interface Settings {
   contact_active_days?: string
 }
 
-export interface LeadsSummaryBucket {
+export interface LeadsSummaryStat {
   count: number
-  pct: number
+  pax: number
+  total_price: number
 }
 
 export interface LeadsSummary {
   total_leads: number
-  convert: LeadsSummaryBucket
-  cancel: LeadsSummaryBucket
-  need_response: LeadsSummaryBucket
-  waiting_customer: LeadsSummaryBucket
-  dormant: LeadsSummaryBucket
+  total_cold: number
+  total_warm: number
+  hot: LeadsSummaryStat
+  total_convert: number
+  loss: LeadsSummaryStat
+  close: { count: number }
 }
 
 export interface ReportSalesRow {
@@ -236,6 +238,7 @@ export interface ChartRow {
   leads: number
   closing: number
   revenue: number
+  total_price: number
   ad_spend: number
   ads_conversations: number
 }

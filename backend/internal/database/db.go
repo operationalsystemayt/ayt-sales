@@ -65,9 +65,11 @@ func migrate(db *gorm.DB) {
 func seed(db *gorm.DB) {
 	// Idempotent backfills for already-provisioned databases (run every startup)
 	db.Model(&models.MasterResult{}).Where("name = ?", "Deal").Update("name", "Converted")
+	db.Model(&models.MasterResult{}).Where("name = ?", "Cancel").Update("name", "Close")
 	seedSettings(db)
 	seedCloseStatus(db)
 	seedManualStatus(db)
+	seedLossResult(db)
 	seedCountries(db)
 
 	var count int64
@@ -97,7 +99,7 @@ func seed(db *gorm.DB) {
 	}
 	db.Create(&statuses)
 
-	results := []models.MasterResult{{Name: "Belum"}, {Name: "Cancel"}, {Name: "Converted"}}
+	results := []models.MasterResult{{Name: "Belum"}, {Name: "Close"}, {Name: "Converted"}}
 	db.Create(&results)
 
 	groups := []models.ProductGroup{{Name: "Open Trip"}, {Name: "Private Trip"}}
@@ -202,5 +204,14 @@ func seedCloseStatus(db *gorm.DB) {
 	var s models.MasterStatus
 	if err := db.Where("name = ?", "Close").First(&s).Error; err != nil {
 		db.Create(&models.MasterStatus{Name: "Close", Color: "black"})
+	}
+}
+
+// seedLossResult adds the "Loss" lead result (a lead that didn't convert and
+// won't — distinct from "Close", which is the renamed former "Cancel").
+func seedLossResult(db *gorm.DB) {
+	var r models.MasterResult
+	if err := db.Where("name = ?", "Loss").First(&r).Error; err != nil {
+		db.Create(&models.MasterResult{Name: "Loss"})
 	}
 }
