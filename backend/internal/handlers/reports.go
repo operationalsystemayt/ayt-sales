@@ -51,7 +51,7 @@ func GetReportSales(c *gin.Context) {
 			GROUP BY sales_id
 		) l ON l.sales_id = u.id
 		LEFT JOIN (
-			SELECT sales_id, COUNT(*) as closing_count, COALESCE(SUM(pax), 0) as total_pax, COALESCE(SUM(total_paid), 0) as revenue
+			SELECT sales_id, COUNT(*) as closing_count, COALESCE(SUM(pax), 0) as total_pax, COALESCE(SUM(total_price), 0) as revenue
 			FROM bookings
 			WHERE booking_date BETWEEN ? AND ? AND deleted_at IS NULL
 			GROUP BY sales_id

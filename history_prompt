@@ -1679,7 +1679,7 @@ sudo chown -R aytsales:aytsales /var/www/ayt-sales
 
   Raya — 6282220056881:
   curl -X POST http://10.150.74.5:3000/api/6282220056881/auth/request-code \
-    -H "Content-Type: application/json" -H "X-Api-Key: $WAHA_KEY" \
+    -H "Content-Type: application/json" -H "X-Api-Key: e3af51043f031366b08bdc4e7c913eb7" \
     -d '{"phoneNumber": "6282220056881"}'
   Dapat respons {"code": "ABCD-ABCD"} → di HP nomor 6282220056881: WhatsApp → Linked Devices → Link a Device → Link with phone number instead → masukkan kode itu.
 
@@ -1694,6 +1694,10 @@ sudo chown -R aytsales:aytsales /var/www/ayt-sales
     -H "Content-Type: application/json" -H "X-Api-Key: $WAHA_KEY" \
     -d '{"phoneNumber": "6282220056884"}'
   Ulangi proses link di HP nomor 6282220056884.
+
+    curl -X POST http://10.150.74.5:3000/api/6282220056881/auth/request-code \
+    -H "Content-Type: application/json" -H "X-Api-Key: e3af51043f031366b08bdc4e7c913eb7" \
+    -d '{"phoneNumber": "6285121151715"}'
 
   Verifikasi ketiganya WORKING:
   curl -H "X-Api-Key: $WAHA_KEY" http://10.150.74.5:3000/api/sessions
@@ -1837,3 +1841,66 @@ sudo chown -R aytsales:aytsales /var/www/ayt-sales
 
   CR Peserta biasanya lebih tinggi dari CR Pemesan kalau produk kamu sering dipesan grup (misal 1 booking = 4 orang keluarga) — CR Peserta di kasus itu menangkap
   "size" dari tiap closing, sedangkan CR Pemesan cuma menangkap "berapa banyak transaksi".
+
+
+
+menambahkan user baru 
+1. command menambahkan user baru : curl -X POST http://10.150.74.5:3000/api/6285121151715/auth/request-code \
+    -H "Content-Type: application/json" -H "X-Api-Key: e3af51043f031366b08bdc4e7c913eb7" \
+    -d '{"phoneNumber": "6285121151715"}'
+2. nama session baru nya : 6285121151715
+
+
+1. Ambil WEBHOOK_SECRET dari VPS-A (kalau belum hafal):
+  # di VPS-A
+  grep WEBHOOK_SECRET /var/www/ayt-sales/backend/.env
+  a1fe56bc33e9dfb1ce6ce1a8e63af6110013a05cca1041bb
+
+  2. Di VPS-B, buat session-nya dulu:
+  curl -X POST http://10.150.74.5:3000/api/sessions \
+    -H "Content-Type: application/json" -H "X-Api-Key: e3af51043f031366b08bdc4e7c913eb7" \
+    -d '{
+      "name": "628126111291",
+      "config": {
+        "webhooks": [{
+          "url": "https://aytsalessys.web.id/api/webhooks/waha",
+          "events": ["message"],
+          "customHeaders": [{ "name": "X-Webhook-Secret", "value": "a1fe56bc33e9dfb1ce6ce1a8e63af6110013a05cca1041bb" }]
+        }]
+      }
+    }'
+
+  3. Cek session-nya benar-benar kebuat:
+  curl -H "X-Api-Key: e3af51043f031366b08bdc4e7c913eb7" http://10.150.74.5:3000/api/sessions
+  Harus muncul entry dengan "name": "628126111291".
+
+  4. Baru sekarang jalankan command pairing code kamu tadi — sekarang harusnya tidak error lagi:
+  curl -X POST http://10.150.74.5:3000/api/628126111291/auth/request-code \
+    -H "Content-Type: application/json" -H "X-Api-Key: e3af51043f031366b08bdc4e7c913eb7" \
+    -d '{"phoneNumber": "628126111291"}'
+  Kalau berhasil, dapat respons {"code": "ABCD-ABCD"} → masukkan di HP nomor 628126111291: WhatsApp → Linked Devices →
+  Link a Device → Link with phone number instead.
+
+  Setelah status session jadi WORKING (cek lagi GET /api/sessions), terakhir daftarkan di CRM: Pengaturan → Kelola User →
+  edit user sales yang pakai nomor ini → isi field WAHA session = 6285121151715.
+
+
+   1. Cek ulang dengan ?all=true (dan pastikan command-nya tidak kepotong kali ini):
+  curl -H "X-Api-Key: e3af51043f031366b08bdc4e7c913eb7" "http://10.150.74.5:3000/api/sessions?all=true"
+  Kalau sekarang muncul entry "name": "6285121151715", berarti session-nya memang ada, cuma belum ke-start.
+
+  2. Start session-nya secara eksplisit (sesuai catatan di history kamu sendiri — WAHA kadang tidak auto-start session
+  baru):
+  curl -X POST http://10.150.74.5:3000/api/sessions/628126111291/start \
+    -H "X-Api-Key: e3af51043f031366b08bdc4e7c913eb7"
+
+  3. Cek status-nya sekarang (harus jadi STARTING atau SCAN_QR_CODE, bukan STOPPED lagi):
+  curl -H "X-Api-Key: e3af51043f031366b08bdc4e7c913eb7" http://10.150.74.5:3000/api/sessions/628126111291
+
+  4. Baru minta pairing code:
+  curl -X POST http://10.150.74.5:3000/api/628126111291/auth/request-code \
+    -H "Content-Type: application/json" -H "X-Api-Key: e3af51043f031366b08bdc4e7c913eb7" \
+    -d '{"phoneNumber": "628126111291"}'
+
+  cd /opt/waha
+  docker compose logs -f --tail=100 waha

@@ -83,7 +83,7 @@ func GetDashboardLeaderboard(c *gin.Context) {
 	database.DB.Raw(`
 		SELECT u.id as sales_id, u.full_name, u.avatar,
 		       COALESCE(SUM(b.pax), 0) as total_pax,
-		       COALESCE(SUM(b.total_paid), 0) as revenue
+		       COALESCE(SUM(b.total_price), 0) as revenue
 		FROM users u
 		LEFT JOIN bookings b ON b.sales_id = u.id
 		  AND b.booking_date BETWEEN ? AND ?
@@ -125,7 +125,7 @@ func GetDashboardTopProducts(c *gin.Context) {
 		       COALESCE(STRING_AGG(DISTINCT co.name, ', '), '') as country_name,
 		       agg.total_pax, agg.revenue
 		FROM (
-			SELECT b.product_id, COALESCE(SUM(b.pax), 0) as total_pax, COALESCE(SUM(b.total_paid), 0) as revenue
+			SELECT b.product_id, COALESCE(SUM(b.pax), 0) as total_pax, COALESCE(SUM(b.total_price), 0) as revenue
 			FROM bookings b
 			WHERE b.booking_date BETWEEN ? AND ? AND b.deleted_at IS NULL
 			GROUP BY b.product_id
@@ -241,7 +241,7 @@ func GetTopTrips(c *gin.Context) {
 	database.DB.Raw(`
 		SELECT p.trip_type,
 		       COALESCE(SUM(b.pax), 0) as total_pax,
-		       COALESCE(SUM(b.total_paid), 0) as revenue
+		       COALESCE(SUM(b.total_price), 0) as revenue
 		FROM bookings b
 		JOIN products p ON p.id = b.product_id
 		WHERE b.booking_date BETWEEN ? AND ?
