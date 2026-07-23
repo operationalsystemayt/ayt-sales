@@ -7,7 +7,7 @@ const navItems = [
   { to: '/leads', icon: Users, label: 'Leads & Prospects' },
   { to: '/booking', icon: BookOpen, label: 'Booking' },
   { to: '/report', icon: TrendingUp, label: 'Report' },
-  { to: '/chat', icon: MessageCircle, label: 'Chat' },
+  { to: '/chat', icon: MessageCircle, label: 'Chat' },lalalala
   { to: '/contact', icon: Contact, label: 'Contact' },
   { to: '/setup', icon: Package, label: 'Setup' },
   { to: '/settings', icon: SlidersHorizontal, label: 'Pengaturan' },
