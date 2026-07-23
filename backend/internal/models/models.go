@@ -105,20 +105,20 @@ type Customer struct {
 
 type Lead struct {
 	ID           uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
-	CustomerID   uuid.UUID      `gorm:"type:uuid;not null" json:"customer_id"`
+	CustomerID   uuid.UUID      `gorm:"type:uuid;not null;index" json:"customer_id"`
 	Customer     *Customer      `gorm:"foreignKey:CustomerID" json:"customer,omitempty"`
-	SalesID      *uuid.UUID     `gorm:"type:uuid" json:"sales_id"`
+	SalesID      *uuid.UUID     `gorm:"type:uuid;index" json:"sales_id"`
 	Sales        *User          `gorm:"foreignKey:SalesID" json:"sales,omitempty"`
 	LeadNo       string         `gorm:"type:varchar(50);uniqueIndex" json:"lead_no"`
 	SourceID     *uint          `json:"source_id"`
 	Source       *MasterSource  `gorm:"foreignKey:SourceID" json:"source,omitempty"`
 	InputID      *uint          `json:"input_id"`
 	Input        *MasterInput   `gorm:"foreignKey:InputID" json:"input,omitempty"`
-	QualityID    *uint          `json:"quality_id"`
+	QualityID    *uint          `gorm:"index" json:"quality_id"`
 	Quality      *MasterQuality `gorm:"foreignKey:QualityID" json:"quality,omitempty"`
-	StatusID     *uint          `json:"status_id"`
+	StatusID     *uint          `gorm:"index" json:"status_id"`
 	Status       *MasterStatus  `gorm:"foreignKey:StatusID" json:"status,omitempty"`
-	ResultID     *uint          `json:"result_id"`
+	ResultID     *uint          `gorm:"index" json:"result_id"`
 	Result       *MasterResult  `gorm:"foreignKey:ResultID" json:"result,omitempty"`
 	ProductID    *uint          `json:"product_id"`
 	Product      *Product       `gorm:"foreignKey:ProductID" json:"product,omitempty"`
@@ -127,7 +127,7 @@ type Lead struct {
 	Price        *float64       `gorm:"type:numeric(15,2)" json:"price"`
 	Pax          *int           `json:"pax"`
 	TotalPrice   *float64       `gorm:"type:numeric(15,2)" json:"total_price"`
-	DateReceived *time.Time     `gorm:"type:date" json:"date_received"`
+	DateReceived *time.Time     `gorm:"type:date;index" json:"date_received"`
 	DealDate     *time.Time     `gorm:"type:date" json:"deal_date"`
 	FollowUpDate *time.Time     `gorm:"type:date" json:"follow_up_date"`
 	LastChatAt   *time.Time     `json:"last_chat_at"`
@@ -159,10 +159,10 @@ type AdInsight struct {
 type Booking struct {
 	ID               uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
 	BookingNo        string         `gorm:"type:varchar(50);uniqueIndex;not null" json:"booking_no"`
-	CustomerID       uuid.UUID      `gorm:"type:uuid;not null" json:"customer_id"`
+	CustomerID       uuid.UUID      `gorm:"type:uuid;not null;index" json:"customer_id"`
 	Customer         *Customer      `gorm:"foreignKey:CustomerID" json:"customer,omitempty"`
-	LeadID           *uuid.UUID     `gorm:"type:uuid" json:"lead_id"`
-	SalesID          *uuid.UUID     `gorm:"type:uuid" json:"sales_id"`
+	LeadID           *uuid.UUID     `gorm:"type:uuid;index" json:"lead_id"`
+	SalesID          *uuid.UUID     `gorm:"type:uuid;index" json:"sales_id"`
 	Sales            *User          `gorm:"foreignKey:SalesID" json:"sales,omitempty"`
 	ProductID        *uint          `json:"product_id"`
 	Product          *Product       `gorm:"foreignKey:ProductID" json:"product,omitempty"`
@@ -174,7 +174,7 @@ type Booking struct {
 	Lead             *Lead          `gorm:"foreignKey:LeadID" json:"lead,omitempty"`
 	DepartureID      *uint          `json:"departure_id"`
 	Departure        *Departure     `gorm:"foreignKey:DepartureID" json:"departure,omitempty"`
-	BookingDate      time.Time      `gorm:"type:date;not null" json:"booking_date"`
+	BookingDate      time.Time      `gorm:"type:date;not null;index" json:"booking_date"`
 	DepartureDate    *time.Time     `gorm:"type:date" json:"departure_date"`
 	Pax              int            `gorm:"not null" json:"pax"`
 	PricePerPax      float64        `gorm:"type:numeric(18,2)" json:"price_per_pax"`
@@ -211,13 +211,16 @@ type LeadActivity struct {
 }
 
 type Chat struct {
-	ID                uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
-	LeadID            uuid.UUID  `gorm:"type:uuid;not null;index" json:"lead_id"`
+	ID uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	// Composite index on (lead_id, chat_timestamp) covers every hot query on this
+	// table: "latest message for lead X" and "full/paged thread for lead X",
+	// both filtered by lead_id and ordered by chat_timestamp.
+	LeadID            uuid.UUID  `gorm:"type:uuid;not null;index:idx_chats_lead_time,priority:1" json:"lead_id"`
 	CustomerID        uuid.UUID  `gorm:"type:uuid;not null" json:"customer_id"`
 	Direction         string     `gorm:"type:varchar(10);not null" json:"direction"` // "in" | "out"
 	FromPhone         string     `gorm:"type:varchar(30)" json:"from_phone"`
 	Body              string     `gorm:"type:text" json:"body"`
-	ChatTimestamp     time.Time  `json:"chat_timestamp"`
+	ChatTimestamp     time.Time  `gorm:"index:idx_chats_lead_time,priority:2" json:"chat_timestamp"`
 	ProviderMessageID *string    `gorm:"type:varchar(200);index" json:"provider_message_id,omitempty"`
 	CreatedBy         *uuid.UUID `gorm:"type:uuid" json:"created_by,omitempty"`
 	CreatedAt         time.Time  `json:"created_at"`

@@ -41,9 +41,38 @@ func chatFilters(c *gin.Context) *gorm.DB {
 	return q
 }
 
-// GetChatInbox lists every conversation (a Lead with at least one Chat row),
+// unreadCountsByLead counts unread inbound messages (direction = 'in', newer
+// than the lead's own last_read_at) per lead in leadIDs, in a single query
+// joined against leads for each lead's own last_read_at — used to avoid
+// querying chats once per lead.
+func unreadCountsByLead(leadIDs []uuid.UUID) map[uuid.UUID]int64 {
+	result := make(map[uuid.UUID]int64, len(leadIDs))
+	if len(leadIDs) == 0 {
+		return result
+	}
+	type row struct {
+		LeadID uuid.UUID
+		Count  int64
+	}
+	var rows []row
+	database.DB.Raw(`
+		SELECT c.lead_id, COUNT(*) as count
+		FROM chats c
+		JOIN leads l ON l.id = c.lead_id
+		WHERE c.lead_id IN (?) AND c.direction = 'in'
+		  AND (l.last_read_at IS NULL OR c.chat_timestamp > l.last_read_at)
+		GROUP BY c.lead_id
+	`, leadIDs).Scan(&rows)
+	for _, r := range rows {
+		result[r.LeadID] = r.Count
+	}
+	return result
+}
+
+// GetChatInbox lists conversations (a Lead with at least one Chat row),
 // annotated with its last message and unread count, powering the Chat tab's
-// conversation list.
+// conversation list — capped to the 200 most recently active, no pagination
+// UI exists for this list yet.
 func GetChatInbox(c *gin.Context) {
 	var leads []models.Lead
 	chatFilters(c).Model(&models.Lead{}).
@@ -54,29 +83,27 @@ func GetChatInbox(c *gin.Context) {
 		Preload("Product").
 		Preload("Group").
 		Order("last_chat_at DESC").
+		Limit(200).
 		Find(&leads)
+
+	ids := make([]uuid.UUID, len(leads))
+	for i, l := range leads {
+		ids[i] = l.ID
+	}
+	latest := latestChatsByLead(ids)
+	unread := unreadCountsByLead(ids)
 
 	dormantHours := GetDormantHours()
 	closeHours := GetCloseHours()
 	needResponseID, waitingCustomerID, dormantID, closeID := statusIDsByName()
+	batchRecomputeLeadStatus(leads, latest, dormantHours, closeHours, needResponseID, waitingCustomerID, dormantID, closeID)
 
 	items := make([]chatInboxItem, 0, len(leads))
 	for i := range leads {
-		recomputeLeadStatus(&leads[i], dormantHours, closeHours, needResponseID, waitingCustomerID, dormantID, closeID)
-
-		var lastChat models.Chat
-		database.DB.Where("lead_id = ?", leads[i].ID).Order("chat_timestamp DESC").First(&lastChat)
-
-		unreadQuery := database.DB.Model(&models.Chat{}).Where("lead_id = ? AND direction = 'in'", leads[i].ID)
-		if leads[i].LastReadAt != nil {
-			unreadQuery = unreadQuery.Where("chat_timestamp > ?", *leads[i].LastReadAt)
-		}
-		var unread int64
-		unreadQuery.Count(&unread)
-
-		item := chatInboxItem{Lead: leads[i], UnreadCount: unread}
-		if lastChat.ID != uuid.Nil {
-			item.LastMessage = &lastChat
+		item := chatInboxItem{Lead: leads[i], UnreadCount: unread[leads[i].ID]}
+		if lc, ok := latest[leads[i].ID]; ok {
+			lcCopy := lc
+			item.LastMessage = &lcCopy
 		}
 		items = append(items, item)
 	}
@@ -85,15 +112,24 @@ func GetChatInbox(c *gin.Context) {
 }
 
 // GetChatSummary powers the Chat tab's summary/SLA cards, using the exact same
-// filter set and status recompute as GetChatInbox so the numbers always agree
-// with what's shown in the list below them.
+// filter set and status recompute as GetChatInbox — but left uncapped (unlike
+// GetChatInbox's 200-row list limit) since it only returns aggregate counts,
+// so the SLA numbers reflect every matching conversation, not just the most
+// recently active 200 shown in the list below them.
 func GetChatSummary(c *gin.Context) {
 	var leads []models.Lead
 	chatFilters(c).Model(&models.Lead{}).Find(&leads)
 
+	ids := make([]uuid.UUID, len(leads))
+	for i, l := range leads {
+		ids[i] = l.ID
+	}
+	latest := latestChatsByLead(ids)
+
 	dormantHours := GetDormantHours()
 	closeHours := GetCloseHours()
 	needResponseID, waitingCustomerID, dormantID, closeID := statusIDsByName()
+	batchRecomputeLeadStatus(leads, latest, dormantHours, closeHours, needResponseID, waitingCustomerID, dormantID, closeID)
 
 	var needResponse, waitingCustomer, dormant, selesaiHariIni int64
 	var over30m, m15to30, m5to15, under5m int64
@@ -101,7 +137,6 @@ func GetChatSummary(c *gin.Context) {
 	today := now.Format("2006-01-02")
 
 	for i := range leads {
-		recomputeLeadStatus(&leads[i], dormantHours, closeHours, needResponseID, waitingCustomerID, dormantID, closeID)
 		if leads[i].StatusID == nil {
 			continue
 		}

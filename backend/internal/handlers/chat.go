@@ -37,8 +37,13 @@ func GetLeadChats(c *gin.Context) {
 		forbidden(c)
 		return
 	}
+	// Cap to the latest 200 messages — fetched newest-first so LIMIT keeps the
+	// right window, then reversed back to chronological order for the UI.
 	var chats []models.Chat
-	database.DB.Where("lead_id = ?", c.Param("id")).Order("chat_timestamp ASC").Find(&chats)
+	database.DB.Where("lead_id = ?", c.Param("id")).Order("chat_timestamp DESC").Limit(200).Find(&chats)
+	for i, j := 0, len(chats)-1; i < j; i, j = i+1, j-1 {
+		chats[i], chats[j] = chats[j], chats[i]
+	}
 	c.JSON(http.StatusOK, chats)
 }
 

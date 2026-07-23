@@ -63,6 +63,7 @@ export default function BookingPage() {
   const { user: currentUser } = useAuthStore()
   const isSales = currentUser?.role === 'sales'
   const [bookings, setBookings] = useState<Booking[]>([])
+  const [total, setTotal] = useState(0)
   const [summary, setSummary] = useState<BookingSummary | null>(null)
   const [page, setPage] = useState(1)
   const [filters, setFilters] = useState({ sales_id: '', status: '', product_id: '' })
@@ -87,13 +88,14 @@ export default function BookingPage() {
   const [paymentForm, setPaymentForm] = useState({ amount: '', label: 'DP', customLabel: '' })
 
   const loadData = useCallback(async () => {
-    const params: Record<string, string> = {}
+    const params: Record<string, string | number> = { page, page_size: PAGE_SIZE }
     Object.entries(filters).forEach(([k, v]) => { if (v) params[k] = v })
     Object.assign(params, getDateRange(period, customRange))
     const [b, s] = await Promise.all([getBookings(params), getBookingSummary(params)])
-    setBookings(b.data)
+    setBookings(b.data.data ?? [])
+    setTotal(b.data.total ?? 0)
     setSummary(s.data)
-  }, [filters, period, customRange])
+  }, [filters, period, customRange, page])
 
   useEffect(() => {
     Promise.all([getUsers(), getProducts(), getCountries()]).then(([u, p, c]) => {
@@ -103,8 +105,7 @@ export default function BookingPage() {
 
   useEffect(() => { loadData() }, [loadData])
 
-  const pagedBookings = bookings.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
-  const totalPages = Math.ceil(bookings.length / PAGE_SIZE)
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   const handleCreate = async () => {
     await createBooking({
@@ -253,7 +254,7 @@ export default function BookingPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {pagedBookings.map((b) => {
+              {bookings.map((b) => {
                 const duration = b.lead?.date_received
                   ? differenceInCalendarDays(new Date(b.booking_date), new Date(b.lead.date_received))
                   : null
@@ -374,7 +375,7 @@ export default function BookingPage() {
                   </td>
                 </tr>
               )})}
-              {pagedBookings.length === 0 && (
+              {bookings.length === 0 && (
                 <tr><td colSpan={18} className="text-center py-12 text-gray-400">Tidak ada data booking</td></tr>
               )}
             </tbody>
@@ -383,7 +384,7 @@ export default function BookingPage() {
 
         <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
           <span className="text-xs text-gray-500">
-            Menampilkan {Math.min((page-1)*PAGE_SIZE+1, bookings.length)}–{Math.min(page*PAGE_SIZE, bookings.length)} dari {bookings.length} data
+            Menampilkan {total === 0 ? 0 : (page-1)*PAGE_SIZE+1}–{(page-1)*PAGE_SIZE+bookings.length} dari {total} data
           </span>
           <div className="flex items-center gap-1">
             <button onClick={() => setPage(Math.max(1, page-1))} disabled={page===1} className="p-1.5 rounded-lg hover:bg-gray-100 disabled:opacity-30">

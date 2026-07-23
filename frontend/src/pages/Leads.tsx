@@ -41,6 +41,7 @@ export default function Leads() {
   const { user: currentUser } = useAuthStore()
   const isSales = currentUser?.role === 'sales'
   const [leads, setLeads] = useState<Lead[]>([])
+  const [total, setTotal] = useState(0)
   const [summary, setSummary] = useState<LeadsSummary | null>(null)
   const [page, setPage] = useState(1)
   const [filters, setFilters] = useState({ sales_id: '', status_id: '', quality_id: '', result_id: '', product_id: '', search: '' })
@@ -94,16 +95,17 @@ export default function Leads() {
   }, [])
 
   const buildParams = useCallback(() => {
-    const params: Record<string, string> = {}
+    const params: Record<string, string | number> = { page, page_size: PAGE_SIZE }
     Object.entries(filters).forEach(([k, v]) => { if (v) params[k] = v })
     Object.assign(params, getDateRange(period, customRange))
     return params
-  }, [filters, period, customRange])
+  }, [filters, period, customRange, page])
 
   const loadLeads = useCallback(async () => {
     const params = buildParams()
     const [leadsRes, summaryRes] = await Promise.all([getLeads(params), getLeadsSummary(params)])
-    setLeads(leadsRes.data)
+    setLeads(leadsRes.data.data ?? [])
+    setTotal(leadsRes.data.total ?? 0)
     setSummary(summaryRes.data)
     setSelected([])
   }, [buildParams])
@@ -111,14 +113,13 @@ export default function Leads() {
   useEffect(() => { loadMasters() }, [loadMasters])
   useEffect(() => { loadLeads() }, [loadLeads])
 
-  const pagedLeads = leads.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
-  const totalPages = Math.ceil(leads.length / PAGE_SIZE)
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   const toggleSelect = (id: string) =>
     setSelected((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
 
   const toggleAll = () =>
-    setSelected(selected.length === pagedLeads.length ? [] : pagedLeads.map((l) => l.id))
+    setSelected(selected.length === leads.length ? [] : leads.map((l) => l.id))
 
   const handleInlineUpdate = async (id: string, field: string, value: string | number | null) => {
     await updateLead(id, { [field]: value })
@@ -314,7 +315,7 @@ export default function Leads() {
             <thead>
               <tr className="border-b border-gray-100">
                 <th className="px-3 py-3 text-left w-8">
-                  <input type="checkbox" checked={selected.length === pagedLeads.length && pagedLeads.length > 0} onChange={toggleAll} className="rounded" />
+                  <input type="checkbox" checked={selected.length === leads.length && leads.length > 0} onChange={toggleAll} className="rounded" />
                 </th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">No.</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sales</th>
@@ -337,7 +338,7 @@ export default function Leads() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {pagedLeads.map((lead, idx) => (
+              {leads.map((lead, idx) => (
                 <tr key={lead.id} className={`hover:bg-gray-50/50 transition-colors ${selected.includes(lead.id) ? 'bg-blue-50/30' : ''}`}>
                   <td className="px-3 py-3">
                     <input type="checkbox" checked={selected.includes(lead.id)} onChange={() => toggleSelect(lead.id)} className="rounded" />
@@ -470,7 +471,7 @@ export default function Leads() {
                   </td>
                 </tr>
               ))}
-              {pagedLeads.length === 0 && (
+              {leads.length === 0 && (
                 <tr><td colSpan={19} className="text-center py-12 text-gray-400">Tidak ada data lead</td></tr>
               )}
             </tbody>
@@ -480,7 +481,7 @@ export default function Leads() {
         {/* Pagination */}
         <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
           <span className="text-xs text-gray-500">
-            Menampilkan {Math.min((page - 1) * PAGE_SIZE + 1, leads.length)}–{Math.min(page * PAGE_SIZE, leads.length)} dari {leads.length} data
+            Menampilkan {total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–{(page - 1) * PAGE_SIZE + leads.length} dari {total} data
           </span>
           <div className="flex items-center gap-1">
             <button onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1} className="p-1.5 rounded-lg hover:bg-gray-100 disabled:opacity-30">

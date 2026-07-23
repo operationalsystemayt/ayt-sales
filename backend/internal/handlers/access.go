@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/ayt-sales/backend/internal/database"
 	"github.com/ayt-sales/backend/internal/models"
@@ -9,6 +10,22 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+// pagination parses page/page_size query params (1-indexed page, default
+// page_size 20 to match the frontend's default, capped at 200 to bound
+// response size regardless of what a caller passes) for list endpoints that
+// support server-side paging.
+func pagination(c *gin.Context) (page, pageSize int) {
+	page = 1
+	if p, err := strconv.Atoi(c.Query("page")); err == nil && p > 0 {
+		page = p
+	}
+	pageSize = 20
+	if ps, err := strconv.Atoi(c.Query("page_size")); err == nil && ps > 0 && ps <= 200 {
+		pageSize = ps
+	}
+	return page, pageSize
+}
 
 func currentUserID(c *gin.Context) uuid.UUID {
 	return c.MustGet("user_id").(uuid.UUID)

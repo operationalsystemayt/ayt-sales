@@ -13,31 +13,24 @@ import (
 )
 
 func GetBookings(c *gin.Context) {
+	page, pageSize := pagination(c)
+
+	var total int64
+	bookingSummaryFilters(c).Count(&total)
+
 	var bookings []models.Booking
-	q := database.DB.
+	q := bookingSummaryFilters(c).
 		Preload("Customer").
 		Preload("Sales").
 		Preload("Product.Countries").
 		Preload("Countries").
 		Preload("Lead").
-		Order("created_at DESC")
-
-	q = scopeSalesFilter(c, q)
-	if status := c.Query("status"); status != "" {
-		q = q.Where("booking_status = ?", status)
-	}
-	if productID := c.Query("product_id"); productID != "" {
-		q = q.Where("product_id = ?", productID)
-	}
-	if dateFrom := c.Query("date_from"); dateFrom != "" {
-		q = q.Where("booking_date >= ?", dateFrom)
-	}
-	if dateTo := c.Query("date_to"); dateTo != "" {
-		q = q.Where("booking_date <= ?", dateTo)
-	}
+		Order("created_at DESC").
+		Limit(pageSize).
+		Offset((page - 1) * pageSize)
 
 	q.Find(&bookings)
-	c.JSON(http.StatusOK, bookings)
+	c.JSON(http.StatusOK, gin.H{"data": bookings, "total": total})
 }
 
 // bookingSummaryFilters applies the same filter set GetBookings supports, so the

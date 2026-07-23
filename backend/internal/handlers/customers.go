@@ -22,7 +22,9 @@ func GetCustomers(c *gin.Context) {
 		q = q.Where("full_name ILIKE ? OR phone ILIKE ?", like, like)
 	}
 
-	q.Find(&customers)
+	// Cap to the 200 most recently updated — no pagination UI exists for this
+	// list yet.
+	q.Limit(200).Find(&customers)
 	c.JSON(http.StatusOK, customers)
 }
 

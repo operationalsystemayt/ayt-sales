@@ -42,9 +42,31 @@ func leadListFilters(c *gin.Context, q *gorm.DB) *gorm.DB {
 	return q
 }
 
+// leadFilterQuery returns the Lead query matching GetLeads' filter set (role
+// scope, status/quality/result/product, date range, search) plus its default
+// is_converted scoping — called fresh for both the Count and the paginated
+// Find below so neither reuses a consumed GORM statement.
+//
+// Default view (no explicit Hasil filter) hides leads that have left the active
+// pipeline. But if the user explicitly filters by result_id (e.g. Converted or
+// Loss), show matching leads regardless of is_converted — otherwise a lead that
+// converted could never be found again through this filter.
+func leadFilterQuery(c *gin.Context) *gorm.DB {
+	q := database.DB.Model(&models.Lead{})
+	if c.Query("result_id") == "" {
+		q = q.Where("is_converted = false")
+	}
+	return leadListFilters(c, q)
+}
+
 func GetLeads(c *gin.Context) {
+	page, pageSize := pagination(c)
+
+	var total int64
+	leadFilterQuery(c).Count(&total)
+
 	var leads []models.Lead
-	base := database.DB.
+	leadFilterQuery(c).
 		Preload("Customer").
 		Preload("Sales").
 		Preload("Source").
@@ -53,26 +75,24 @@ func GetLeads(c *gin.Context) {
 		Preload("Status").
 		Preload("Result").
 		Preload("Product.Countries").
-		Preload("Group")
-	// Default view (no explicit Hasil filter) hides leads that have left the active
-	// pipeline. But if the user explicitly filters by result_id (e.g. Converted or
-	// Loss), show matching leads regardless of is_converted — otherwise a lead that
-	// converted could never be found again through this filter.
-	if c.Query("result_id") == "" {
-		base = base.Where("is_converted = false")
-	}
-	q := leadListFilters(c, base).Order("updated_at DESC")
+		Preload("Group").
+		Order("updated_at DESC").
+		Limit(pageSize).
+		Offset((page - 1) * pageSize).
+		Find(&leads)
 
-	q.Find(&leads)
+	ids := make([]uuid.UUID, len(leads))
+	for i, l := range leads {
+		ids[i] = l.ID
+	}
+	latest := latestChatsByLead(ids)
 
 	dormantHours := GetDormantHours()
 	closeHours := GetCloseHours()
 	needResponseID, waitingCustomerID, dormantID, closeID := statusIDsByName()
-	for i := range leads {
-		recomputeLeadStatus(&leads[i], dormantHours, closeHours, needResponseID, waitingCustomerID, dormantID, closeID)
-	}
+	batchRecomputeLeadStatus(leads, latest, dormantHours, closeHours, needResponseID, waitingCustomerID, dormantID, closeID)
 
-	c.JSON(http.StatusOK, leads)
+	c.JSON(http.StatusOK, gin.H{"data": leads, "total": total})
 }
 
 // GetLeadsSummary powers the Leads & Prospects summary cards. total_leads counts every
@@ -146,48 +166,88 @@ func statusIDsByName() (needResponseID, waitingCustomerID, dormantID, closeID ui
 	return nr.ID, wc.ID, do.ID, cl.ID
 }
 
-// recomputeLeadStatus inspects the lead's most recent Chat row and updates status_id
-// in-memory (for this response) and persists it if it changed, so status filters and
-// bulk-edit keep working off the stored column.
-//
-// Rules: an inbound (customer) message always means Need Response, immediately. An
-// outbound (sales) message means Waiting Customer immediately, decaying to Dormant
-// after dormantHours of silence and to Close after closeHours.
-func recomputeLeadStatus(lead *models.Lead, dormantHours, closeHours int, needResponseID, waitingCustomerID, dormantID, closeID uint) {
-	var lastChat models.Chat
-	if err := database.DB.Where("lead_id = ?", lead.ID).
-		Order("chat_timestamp DESC").First(&lastChat).Error; err != nil {
-		return // no chat history yet — leave status untouched
+// latestChatsByLead fetches the most recent Chat row per lead in leadIDs with a
+// single query, keyed by lead ID — used to avoid querying chats once per lead
+// (see batchRecomputeLeadStatus).
+func latestChatsByLead(leadIDs []uuid.UUID) map[uuid.UUID]models.Chat {
+	result := make(map[uuid.UUID]models.Chat, len(leadIDs))
+	if len(leadIDs) == 0 {
+		return result
+	}
+	var chats []models.Chat
+	database.DB.Raw(`
+		SELECT DISTINCT ON (lead_id) *
+		FROM chats
+		WHERE lead_id IN (?)
+		ORDER BY lead_id, chat_timestamp DESC
+	`, leadIDs).Scan(&chats)
+	for _, ch := range chats {
+		result[ch.LeadID] = ch
+	}
+	return result
+}
+
+// batchRecomputeLeadStatus applies the same decay rules as before (an inbound
+// message always means Need Response immediately; an outbound message means
+// Waiting Customer, decaying to Dormant after dormantHours of silence and to
+// Close after closeHours) to a whole page of leads at once: latestByLead (from
+// latestChatsByLead) avoids a per-lead chats query, and status changes are
+// persisted with one UPDATE per distinct new status (at most 4) instead of one
+// per lead.
+func batchRecomputeLeadStatus(leads []models.Lead, latestByLead map[uuid.UUID]models.Chat, dormantHours, closeHours int, needResponseID, waitingCustomerID, dormantID, closeID uint) {
+	if len(leads) == 0 {
+		return
 	}
 
-	var newStatusID uint
-	switch lastChat.Direction {
-	case "in":
-		newStatusID = needResponseID
-	case "out":
-		elapsed := time.Since(lastChat.ChatTimestamp)
-		switch {
-		case elapsed >= time.Duration(closeHours)*time.Hour:
-			newStatusID = closeID
-		case elapsed >= time.Duration(dormantHours)*time.Hour:
-			newStatusID = dormantID
-		default:
-			newStatusID = waitingCustomerID
+	var statusRows []models.MasterStatus
+	database.DB.Where("id IN ?", []uint{needResponseID, waitingCustomerID, dormantID, closeID}).Find(&statusRows)
+	statusByID := make(map[uint]models.MasterStatus, len(statusRows))
+	for _, s := range statusRows {
+		statusByID[s.ID] = s
+	}
+
+	toUpdate := make(map[uint][]uuid.UUID)
+
+	for i := range leads {
+		lastChat, ok := latestByLead[leads[i].ID]
+		if !ok {
+			continue // no chat history yet — leave status untouched
 		}
-	default:
-		return
+
+		var newStatusID uint
+		switch lastChat.Direction {
+		case "in":
+			newStatusID = needResponseID
+		case "out":
+			elapsed := time.Since(lastChat.ChatTimestamp)
+			switch {
+			case elapsed >= time.Duration(closeHours)*time.Hour:
+				newStatusID = closeID
+			case elapsed >= time.Duration(dormantHours)*time.Hour:
+				newStatusID = dormantID
+			default:
+				newStatusID = waitingCustomerID
+			}
+		default:
+			continue
+		}
+		if newStatusID == 0 {
+			continue
+		}
+
+		if leads[i].StatusID == nil || *leads[i].StatusID != newStatusID {
+			toUpdate[newStatusID] = append(toUpdate[newStatusID], leads[i].ID)
+			sid := newStatusID
+			leads[i].StatusID = &sid
+			if st, ok := statusByID[newStatusID]; ok {
+				stCopy := st
+				leads[i].Status = &stCopy
+			}
+		}
 	}
 
-	if newStatusID == 0 {
-		return
-	}
-
-	if lead.StatusID == nil || *lead.StatusID != newStatusID {
-		database.DB.Model(&models.Lead{}).Where("id = ?", lead.ID).Update("status_id", newStatusID)
-		lead.StatusID = &newStatusID
-		var st models.MasterStatus
-		database.DB.First(&st, newStatusID)
-		lead.Status = &st
+	for statusID, leadIDs := range toUpdate {
+		database.DB.Model(&models.Lead{}).Where("id IN ?", leadIDs).Update("status_id", statusID)
 	}
 }
 
